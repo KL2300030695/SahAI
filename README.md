@@ -8,7 +8,7 @@ to say — with every figure in it traced back to the clause it came from.
 It never speaks to the customer, and it cannot write to a customer record on its
 own. Both of those are enforced in code, not asked for in a prompt.
 
-**Six agents · five open-weights models · eight guardrails · $0.002 per call.**
+**Six agents · five open-weights models · eight guardrails · $0.0044 per call.**
 
 ---
 
@@ -221,31 +221,35 @@ choosing different words, not a human dismissing a warning.
 
 ## Cost
 
-**Median $0.0020 per assisted call (₹0.17) — a measured 53× reduction.**
+**A full 15-turn call costs $0.0044 (₹0.36) — a measured 56× reduction.**
 
 Every figure below comes from the `usage` field of real API responses, priced by
-`backend/app/config.py` and persisted per decision. Nothing is estimated. n=20
-real calls.
+`backend/app/config.py` and persisted per decision. Nothing is estimated.
 
-| Seed call | SahAI | Same tokens, one frontier mega-prompt | |
-|---|---|---|---|
-| `call-001` won / hidden charges | $0.003630 | $0.204900 | **56×** |
-| `call-002` dropped / Aadhaar | $0.008490 | $0.398505 | **47×** |
-| `call-004` dropped / not interested | $0.003025 | $0.204015 | **67×** |
+| Seed scenario | Stages | Tokens | SahAI | Same tokens, one frontier mega-prompt | |
+|---|---:|---:|---:|---:|---:|
+| `call-001` won / hidden charges | 48 | 34,248 | $0.004393 | $0.248040 | **56×** |
+| `call-002` dropped / Aadhaar | 48 | 31,479 | $0.004547 | $0.218175 | **48×** |
+| `call-003` won / credit score | 54 | 34,389 | $0.004308 | $0.244005 | **57×** |
+| `call-004` dropped / not interested | 31 | 16,020 | $0.001845 | $0.111140 | **60×** |
 
-Where the money goes, across all 20 measured calls:
+Across 22 measured calls including shorter live-mic sessions, the median is
+**$0.0017 (₹0.14)** at a median **53×**. The seed scenarios above are full-length
+calls and sit at the expensive end, which is the honest number to quote.
+
+Where the money goes, across all 22:
 
 | Tier | Stages | Tokens | USD | Share |
 |---|---:|---:|---:|---:|
-| high | 70 | 91,654 | 0.017880 | 43.8% |
-| standard | 54 | 85,832 | 0.008455 | 20.7% |
-| safety | 48 | 53,427 | 0.005392 | 13.2% |
-| stt | 88 | — | 0.005354 | 13.1% |
-| cheap | 103 | 68,718 | 0.003644 | 8.9% |
-| tiny | 106 | 1,771 | 0.000062 | 0.2% |
-| **none** | **194** | — | **0.000000** | **0.0%** |
+| high | 59 | 90,365 | 0.017329 | 42.2% |
+| standard | 53 | 89,297 | 0.008760 | 21.3% |
+| stt | 92 | — | 0.005653 | 13.8% |
+| safety | 48 | 54,122 | 0.005566 | 13.5% |
+| cheap | 87 | 70,179 | 0.003717 | 9.0% |
+| tiny | 88 | 1,551 | 0.000054 | 0.1% |
+| **none** | **169** | — | **0.000000** | **0.0%** |
 
-**194 of 663 stages (29%) cost nothing** — retrieval and six of the eight
+**169 of 596 stages (28%) cost nothing** — retrieval and six of the eight
 guardrails are local compute. That is the concrete form of *"a smaller model or
 a classical method can replace constant LLM calls"*.
 
@@ -254,9 +258,14 @@ spent. A real mega-prompt would also carry the whole handbook in context on
 every turn instead of retrieving four chunks, so the true gap is wider.
 
 ```bash
-# Reproduce it yourself
+# Reproduce any row yourself
+python -m scripts.run_full_pipeline call-001
 curl "localhost:8000/api/export/trace.csv?call_id=call-001" -o trace.csv
 ```
+
+Re-running a seed scenario **replaces** its ledger rows rather than appending,
+so an exported trace always describes one run. Live calls get a fresh id and
+never collide.
 
 ---
 

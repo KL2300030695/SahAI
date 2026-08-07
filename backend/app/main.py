@@ -56,7 +56,7 @@ from app.crm.db import (
     record_cost,
     session_scope,
 )
-from app.crm.models import Call, Customer
+from app.crm.models import Call, CostRow, Customer
 from app.llm.client import LLMUnavailable, get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
@@ -343,6 +343,15 @@ def record_consent(call_id: str, body: ConsentBody) -> dict:
         call.consent_ack = True
         call.consent_at = live.consent_at
         call.transcript_json = json.dumps(data["turns"])
+
+        # A seed scenario keeps its call_id across runs, so without this the
+        # ledger accumulates: replaying `call-001` three times leaves three
+        # runs' worth of rows under one id, and the exported trace reports a
+        # single call costing triple. Live calls get a fresh uuid and never hit
+        # this. Re-running a scenario replaces the previous run, which is what
+        # "run it again" means to anyone watching.
+        s.query(CostRow).filter(CostRow.call_id == call_id).delete()
+        call.cost_usd = 0.0
 
     return {"call_id": call_id, "consent_ack": True, "consent_at": live.consent_at}
 
