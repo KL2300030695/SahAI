@@ -19,6 +19,8 @@ export interface MicState {
   supported: boolean;
   recording: boolean;
   speaking: boolean;
+  /** True while audio is being discarded because the co-pilot is talking. */
+  muted: boolean;
   level: number; // 0..1 RMS, for the level meter
   error: string | null;
 }
@@ -26,6 +28,16 @@ export interface MicState {
 interface Options {
   /** Fires once per detected utterance with a complete, decodable audio file. */
   onUtterance: (blob: Blob, ms: number) => void;
+  /**
+   * Return true while captured audio must be thrown away.
+   *
+   * This exists for one reason: on a laptop the co-pilot's spoken suggestion
+   * comes out of the speakers right next to this microphone. Without a gate the
+   * pipeline hears its own voice, transcribes it as the customer, and answers
+   * itself — and the transcript fills with fluent sentences nobody said, which
+   * is far worse than a missed turn because nothing about it looks wrong.
+   */
+  gate?: () => boolean;
   /** RMS below this counts as silence. */
   silenceThreshold?: number;
   /** Silence needed to close an utterance. */
@@ -38,6 +50,7 @@ interface Options {
 
 export function useMic({
   onUtterance,
+  gate,
   silenceThreshold = 0.012,
   silenceMs = 900,
   minUtteranceMs = 400,
@@ -50,6 +63,7 @@ export function useMic({
       typeof MediaRecorder !== "undefined",
     recording: false,
     speaking: false,
+    muted: false,
     level: 0,
     error: null,
   });
@@ -65,10 +79,13 @@ export function useMic({
   const lastVoiceRef = useRef(0);
   const startedAtRef = useRef(0);
   const runningRef = useRef(false);
+  const gatedRef = useRef(false);
   const onUtteranceRef = useRef(onUtterance);
   onUtteranceRef.current = onUtterance;
+  const gateRef = useRef(gate);
+  gateRef.current = gate;
 
-  /** Finalise the current recording; `keepGoing` restarts for the next utterance. */
+  /** Finalise the current recording; `emit` decides whether anyone hears it. */
   const cutSegment = useCallback((emit: boolean) => {
     const rec = recorderRef.current;
     if (!rec || rec.state === "inactive") return;
@@ -81,9 +98,12 @@ export function useMic({
       if (emit && blob.size > 2000 && ms >= minUtteranceMs) {
         onUtteranceRef.current(blob, ms);
       }
-      // Restart for the next utterance while the session is still running.
-      if (runningRef.current && streamRef.current) {
+      // Restart for the next utterance while the session is still running —
+      // unless the gate is shut, in which case `tick` restarts us on reopen.
+      if (runningRef.current && streamRef.current && !gatedRef.current) {
         startRecorder(streamRef.current);
+      } else {
+        recorderRef.current = null;
       }
     };
     rec.stop();
@@ -118,6 +138,30 @@ export function useMic({
     const rms = Math.sqrt(sum / buf.length);
 
     const now = performance.now();
+
+    // --- the echo gate -------------------------------------------------
+    // While the co-pilot is speaking, throw the audio away rather than merely
+    // ignoring the level: a half-recorded segment straddling the end of the
+    // suggestion would still carry the tail of it into Whisper.
+    const shutNow = !!gateRef.current?.();
+    if (shutNow !== gatedRef.current) {
+      gatedRef.current = shutNow;
+      if (shutNow) {
+        speakingRef.current = false;
+        cutSegment(false); // discard whatever is in flight
+      } else if (streamRef.current && !recorderRef.current) {
+        startRecorder(streamRef.current);
+      }
+      setState((s) => ({ ...s, muted: shutNow, speaking: false, level: 0 }));
+    }
+    if (shutNow) {
+      // Keep the silence clock fresh so reopening does not immediately look
+      // like the end of a long pause.
+      lastVoiceRef.current = now;
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+
     const loud = rms > silenceThreshold;
     if (loud) {
       lastVoiceRef.current = now;
@@ -143,7 +187,14 @@ export function useMic({
     );
 
     rafRef.current = requestAnimationFrame(tick);
-  }, [cutSegment, maxUtteranceMs, minUtteranceMs, silenceMs, silenceThreshold]);
+  }, [
+    cutSegment,
+    maxUtteranceMs,
+    minUtteranceMs,
+    silenceMs,
+    silenceThreshold,
+    startRecorder,
+  ]);
 
   const start = useCallback(async () => {
     if (runningRef.current) return;
@@ -168,6 +219,7 @@ export function useMic({
       runningRef.current = true;
       lastVoiceRef.current = performance.now();
       speakingRef.current = false;
+      gatedRef.current = false;
       startRecorder(stream);
 
       setState((s) => ({ ...s, recording: true, error: null }));
@@ -195,7 +247,14 @@ export function useMic({
     ctxRef.current = null;
     analyserRef.current = null;
     speakingRef.current = false;
-    setState((s) => ({ ...s, recording: false, speaking: false, level: 0 }));
+    gatedRef.current = false;
+    setState((s) => ({
+      ...s,
+      recording: false,
+      speaking: false,
+      muted: false,
+      level: 0,
+    }));
   }, [cutSegment]);
 
   useEffect(() => () => stop(), [stop]);
@@ -203,42 +262,6 @@ export function useMic({
   return { ...state, start, stop };
 }
 
-/**
- * Speak a suggestion aloud through the browser's speech synthesis.
- *
- * Uses the built-in Web Speech API rather than a TTS provider: it is free,
- * offline, has no added latency, and a co-pilot whispering in the agent's ear
- * does not need a studio voice. Returns a no-op where unsupported.
- */
-export function useSpeech() {
-  const [enabled, setEnabled] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const supported =
-    typeof window !== "undefined" && "speechSynthesis" in window;
-
-  const speak = useCallback(
-    (text: string) => {
-      if (!supported || !enabled || !text) return;
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.05;
-      u.pitch = 1;
-      const voice = window.speechSynthesis
-        .getVoices()
-        .find((v) => /en-(IN|GB|US)/i.test(v.lang));
-      if (voice) u.voice = voice;
-      u.onstart = () => setSpeaking(true);
-      u.onend = () => setSpeaking(false);
-      u.onerror = () => setSpeaking(false);
-      window.speechSynthesis.speak(u);
-    },
-    [enabled, supported],
-  );
-
-  const cancel = useCallback(() => {
-    if (supported) window.speechSynthesis.cancel();
-    setSpeaking(false);
-  }, [supported]);
-
-  return { supported, enabled, setEnabled, speaking, speak, cancel };
-}
+// The co-pilot's voice used to live here as a second hook. It moved to
+// `lib/speech.ts` as a single shared engine — one `enabled` flag for the whole
+// session, and a gate this file consults so the microphone never hears it.

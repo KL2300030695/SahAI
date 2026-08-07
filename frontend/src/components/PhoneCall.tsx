@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
-import { useSpeech } from "../lib/useMic";
+import { voice } from "../lib/speech";
 
 interface TelephonyConfig {
   ready: boolean;
@@ -46,7 +46,6 @@ export default function PhoneCall({
   const [from, setFrom] = useState("");
   const [status, setStatus] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
-  const speech = useSpeech();
 
   useEffect(() => {
     fetch("/api/telephony/config").then((r) => r.json()).then(setConfig).catch(() => {});
@@ -100,7 +99,7 @@ export default function PhoneCall({
         case "assist":
           setStatus("");
           onAssist(m.assist);
-          if (m.assist?.nba?.say && !m.assist.blocked) speech.speak(m.assist.nba.say);
+          if (m.assist?.nba?.say && !m.assist.blocked) voice.speak(m.assist.nba.say);
           break;
         case "ledger":
           onLedger(m.ledger, m.frontier_usd ?? 0);
@@ -217,25 +216,13 @@ export default function PhoneCall({
           </>
         )}
 
-        <label className="flex cursor-pointer items-start gap-2.5 border-t pt-3"
-          style={{ borderColor: "var(--hairline)" }}>
-          <input
-            type="checkbox"
-            checked={speech.enabled}
-            disabled={!speech.supported}
-            onChange={(e) => {
-              speech.setEnabled(e.target.checked);
-              if (!e.target.checked) speech.cancel();
-            }}
-            className="mt-0.5"
-          />
-          <span className="text-[12.5px] leading-snug">
-            Read lines to me
-            <span className="block text-[11.5px]" style={{ color: "var(--graphite)" }}>
-              Earpiece only — the caller must not hear it.
-            </span>
-          </span>
-        </label>
+        <p
+          className="border-t pt-3 text-[11.5px] leading-relaxed"
+          style={{ borderColor: "var(--hairline)", color: "var(--graphite)" }}
+        >
+          Voice is switched on at the top of the screen. Use an earpiece — the
+          caller must not hear the co-pilot.
+        </p>
       </div>
     </section>
   );

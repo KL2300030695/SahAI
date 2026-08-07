@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, openCallSocket } from "./lib/api";
+import { voice } from "./lib/speech";
 import type {
   CallDetail,
   CallSummary,
@@ -101,6 +102,7 @@ export default function App() {
 
   function reset() {
     closeSocket();
+    voice.cancel(); // never let a suggestion carry into the next call
     setTurns([]);
     setAssists([]);
     setLedger(null);
@@ -189,6 +191,10 @@ export default function App() {
         case "assist":
           setThinking(null);
           setAssists((a) => [...a, m.assist]);
+          // The rehearsal path is the one most people see first, so it has to
+          // sound like the real thing. Blocked lines stay silent — the agent
+          // must read why before saying anything.
+          if (m.assist?.nba?.say && !m.assist.blocked) voice.speak(m.assist.nba.say);
           break;
         case "ledger":
           setLedger(m.ledger);
@@ -206,6 +212,7 @@ export default function App() {
 
   async function finalise() {
     if (!selected) return;
+    voice.cancel();
     setBusy(true);
     try {
       const r = await api.finalise(selected);

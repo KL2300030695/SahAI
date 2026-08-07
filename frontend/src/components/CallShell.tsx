@@ -5,6 +5,7 @@ import type {
   TranscriptTurn,
   TurnAssist,
 } from "../lib/types";
+import VoiceControl from "./VoiceControl";
 
 /* ---------------------------------------------------------------------------
    The pieces around the Say Line. Each is deliberately quieter than it —
@@ -43,8 +44,11 @@ export function OnAirStrip({
         </span>
       )}
       {source && <span className="tag">{source}</span>}
-      <span className="ml-auto t-data" style={{ color: "var(--graphite)" }}>
-        {live ? `${mm}:${ss}` : "—"}
+      <span className="ml-auto flex items-center gap-3">
+        <VoiceControl />
+        <span className="t-data" style={{ color: "var(--graphite)" }}>
+          {live ? `${mm}:${ss}` : "—"}
+        </span>
       </span>
     </div>
   );

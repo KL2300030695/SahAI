@@ -11,6 +11,7 @@ from datetime import date
 
 import pytest
 
+from app.agents.nba import _trim_to_sentence
 from app.agents.crm import _coerce_patch_value, _DROP, detect_opt_out
 from app.guardrails import rules
 from app.guardrails.pii import redact, scan
@@ -604,3 +605,58 @@ class TestPatchCoercion:
     def test_correct_types_pass_through(self):
         assert _coerce_patch_value("kyc_status", "completed") == "completed"
         assert _coerce_patch_value("kyc_last_step", 5) == 5
+
+
+# ---------------------------------------------------------------------------
+# Trimming a runaway or cut-off suggestion
+#
+# The suggestion is now read aloud, so an unfinished sentence is not just untidy
+# — the agent hears the co-pilot stop mid-clause and has to guess the rest.
+# ---------------------------------------------------------------------------
+
+
+def test_trim_drops_a_cut_off_fragment():
+    """The real failure: a response truncated mid-sentence by max_tokens."""
+    say = (
+        "First we verify your mobile with an OTP. Then you enter your PAN. "
+        "After"
+    )
+    assert _trim_to_sentence(say) == (
+        "First we verify your mobile with an OTP. Then you enter your PAN."
+    )
+
+
+def test_trim_leaves_a_complete_short_line_untouched():
+    say = "That's a fair question — let me check the exact figure for you."
+    assert _trim_to_sentence(say) == say
+
+
+def test_trim_never_cuts_mid_clause_when_there_is_no_boundary():
+    """A fragment with no earlier sentence to fall back on is left alone.
+
+    Cutting here would be worse than leaving it: "we never share your Aadhaar"
+    truncated to its first four words asserts the opposite of what was written.
+    """
+    say = "We never upload or share your Aadhaar number with"
+    assert _trim_to_sentence(say) == say
+
+
+def test_trim_shortens_a_line_that_blows_the_word_budget():
+    sentence = "This is a padded sentence used to exceed the spoken word budget. "
+    say = (sentence * 6).strip()
+    out = _trim_to_sentence(say)
+    assert len(out.split()) <= 80
+    assert out.endswith(".")
+    assert say.startswith(out)  # only ever removes from the end
+
+
+def test_trim_preserves_a_negation_it_cannot_safely_shorten():
+    """Over budget, but every boundary sits after the negation — keep it whole."""
+    say = (
+        "We never upload or share your Aadhaar number with anyone outside the "
+        "e-KYC flow, and the one-time password you receive is the only thing "
+        "that authorises it, which is why the whole verification takes under a "
+        "minute from start to finish and needs no paperwork from your side."
+    )
+    out = _trim_to_sentence(say)
+    assert "never upload or share" in out

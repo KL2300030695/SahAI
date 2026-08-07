@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMic, useSpeech } from "../lib/useMic";
+import { useMic } from "../lib/useMic";
+import { voice } from "../lib/speech";
 import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
 
 /**
@@ -37,7 +38,6 @@ export default function LiveVoice({
   const [heard, setHeard] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const speech = useSpeech();
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +79,7 @@ export default function LiveVoice({
         case "assist":
           setStatus("");
           onAssist(m.assist);
-          if (m.assist?.nba?.say && !m.assist.blocked) speech.speak(m.assist.nba.say);
+          if (m.assist?.nba?.say && !m.assist.blocked) voice.speak(m.assist.nba.say);
           break;
         case "ledger":
           onLedger(m.ledger, m.frontier_usd ?? 0);
@@ -116,7 +116,9 @@ export default function LiveVoice({
     });
   }, []);
 
-  const mic = useMic({ onUtterance: handleUtterance });
+  // Deaf while the co-pilot reads, or the pipeline transcribes its own voice
+  // as the customer and starts answering itself.
+  const mic = useMic({ onUtterance: handleUtterance, gate: voice.micMuted });
   const level = Math.min(100, Math.round(mic.level * 900));
 
   return (
@@ -155,9 +157,19 @@ export default function LiveVoice({
             <span className="t-label">Input</span>
             <span
               className="text-[11px]"
-              style={{ color: mic.speaking ? "var(--verified)" : "var(--graphite)" }}
+              style={{
+                color: mic.muted
+                  ? "var(--yourcall)"
+                  : mic.speaking
+                    ? "var(--verified)"
+                    : "var(--graphite)",
+              }}
             >
-              {mic.speaking ? "hearing speech" : "quiet"}
+              {mic.muted
+                ? "muted while I read"
+                : mic.speaking
+                  ? "hearing speech"
+                  : "quiet"}
             </span>
           </div>
           <div
@@ -167,8 +179,12 @@ export default function LiveVoice({
             <div
               className="h-full rounded-full"
               style={{
-                width: `${level}%`,
-                background: mic.speaking ? "var(--verified)" : "var(--graphite)",
+                width: mic.muted ? "100%" : `${level}%`,
+                background: mic.muted
+                  ? "var(--yourcall-wash)"
+                  : mic.speaking
+                    ? "var(--verified)"
+                    : "var(--graphite)",
                 transition: "width 80ms linear",
               }}
             />
@@ -197,7 +213,7 @@ export default function LiveVoice({
           <button
             onClick={() => {
               mic.stop();
-              speech.cancel();
+              voice.cancel();
               wsRef.current?.send(JSON.stringify({ action: "end" }));
               onEnd();
             }}
@@ -206,25 +222,6 @@ export default function LiveVoice({
             End
           </button>
         </div>
-
-        <label className="flex cursor-pointer items-start gap-2.5">
-          <input
-            type="checkbox"
-            checked={speech.enabled}
-            disabled={!speech.supported}
-            onChange={(e) => {
-              speech.setEnabled(e.target.checked);
-              if (!e.target.checked) speech.cancel();
-            }}
-            className="mt-0.5"
-          />
-          <span className="text-[12.5px] leading-snug">
-            Read lines to me
-            <span className="block text-[11.5px]" style={{ color: "var(--graphite)" }}>
-              Use an earpiece — the customer must not hear it.
-            </span>
-          </span>
-        </label>
 
         {/* scope note — this is a real limitation, stated */}
         <p
@@ -235,6 +232,11 @@ export default function LiveVoice({
           to operate mid-call. This assumes speakerphone or a solo run — on a
           headset the browser hears you, not them. Use the phone line for a real
           two-party call.
+        </p>
+        <p className="text-[11.5px] leading-relaxed" style={{ color: "var(--graphite)" }}>
+          Voice is switched on at the top of the screen. Wear an earpiece — on
+          speakers the customer hears the co-pilot too, and the mic goes deaf
+          while it reads.
         </p>
 
         <p className="t-data" style={{ color: "var(--graphite)" }}>

@@ -21,6 +21,7 @@ safe to put in front of a customer:
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from app.agents.base import Agent
@@ -61,7 +62,10 @@ HARD RULES:
 4. If the customer says they are not interested, stop selling. Acknowledge,
    confirm the opt-out, close warmly.
 5. Be honest about downsides. A customer surprised later is a complaint.
-6. Keep `say` under 70 words. This is a live call, not an email.
+6. Keep `say` under 70 words, and finish every sentence you start. It is read
+   aloud into the agent's ear while the customer waits, so a paragraph is
+   useless to them — two or three sentences, then stop. If there are more than
+   three steps to cover, give the first ones and offer to go through the rest.
 7. Never claim an action has already happened. You cannot send emails, send
    SMS, look anything up, or change an account. Do NOT write "I've sent you
    an email", "I've updated your account", or "check your inbox". Phrase any
@@ -218,6 +222,50 @@ Write the agent's next line. Respond with JSON only."""
         )
 
 
+#: Rule 6 says "under 70 words". Allow a little slack before intervening, so a
+#: line that merely runs long is left exactly as the model wrote it.
+_SAY_WORD_BUDGET = 80
+
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
+def _trim_to_sentence(say: str) -> str:
+    """Drop a trailing fragment from an over-long or cut-off suggestion.
+
+    Two things produce one: the model ignoring the word budget, and the response
+    hitting `max_tokens` mid-string on a retry that dropped strict JSON mode —
+    which is how a line ended at "...via a second OTP; we never upload or share
+    your Aadhaar number. After" in front of a real agent.
+
+    Only ever cuts at a sentence boundary, and only ever removes text. Truncating
+    mid-clause could invert a meaning ("we never share your Aadhaar" is not the
+    same claim as its first four words), so a fragment with no earlier boundary
+    to fall back on is left alone for the guardrail and the agent to judge rather
+    than silently reshaped here.
+    """
+    if not say:
+        return say
+
+    ends = [m.end() for m in _SENTENCE_END.finditer(say)]
+    over_budget = len(say.split()) > _SAY_WORD_BUDGET
+    unfinished = not ends or ends[-1] != len(say.rstrip())
+
+    if not (over_budget or unfinished):
+        return say
+    if not ends:
+        return say
+
+    if unfinished:
+        # Everything up to the last completed sentence; the tail is a fragment.
+        say = say[: ends[-1]].rstrip()
+
+    while len(say.split()) > _SAY_WORD_BUDGET and len(ends) > 1:
+        ends.pop()
+        say = say[: ends[-1]].rstrip()
+
+    return say
+
+
 def _coerce(data: dict, inp: NBAIn) -> NBAOut:
     raw_action = str(data.get("action_type", "explain")).strip().lower()
     try:
@@ -233,7 +281,7 @@ def _coerce(data: dict, inp: NBAIn) -> NBAOut:
     # check by accident.
     cited = [str(c) for c in cited if str(c) in valid_ids]
 
-    say = str(data.get("say", "")).strip()
+    say = _trim_to_sentence(str(data.get("say", "")).strip())
     if not say:
         say = (
             "Let me pull up the exact details on that for you — I'd rather quote "
