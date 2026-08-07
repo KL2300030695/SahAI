@@ -218,3 +218,55 @@ def test_stage_rows_carry_the_documented_trace_columns(monkeypatch):
     )
     for row in captured:
         assert set(row) == set(TRACE_COLUMNS)
+
+
+# --- setup failures must name their own fix --------------------------------
+
+
+class _Resp:
+    def __init__(self, message): self._m = message
+    def json(self): return {"error": {"message": self._m}}
+
+
+def _wrapped(message):
+    """gspread's shape: a detailed APIError re-raised as a bare PermissionError."""
+    inner = RuntimeError("api error")
+    inner.response = _Resp(message)
+    outer = PermissionError()
+    outer.__cause__ = inner
+    return outer
+
+
+def test_a_disabled_sheets_api_is_named_not_shown_as_permissionerror():
+    """The bare PermissionError gspread raises tells nobody what to do."""
+    msg = sheets._explain(
+        _wrapped(
+            "Google Sheets API has not been used in project 680827501331 before "
+            "or it is disabled. Enable it by visiting ..."
+        )
+    )
+    assert "Sheets API is not enabled" in msg
+    assert "Cloud console" in msg
+
+
+def test_an_unshared_sheet_is_distinguished_from_a_disabled_api():
+    msg = sheets._explain(
+        _wrapped("The caller does not have permission to access this spreadsheet")
+    )
+    assert "Share the sheet" in msg
+    assert "Editor" in msg
+
+
+def test_a_wrong_sheet_id_is_not_mislabelled_a_sharing_problem():
+    """gspread wraps everything in PermissionError, so type must not decide.
+
+    Google returns "not found" both for a bad id and for a sheet you cannot
+    see, so the message names both and puts them in the order worth checking.
+    """
+    msg = sheets._explain(_wrapped("Requested entity was not found."))
+    assert "SHEETS_ID" in msg
+    assert "shared" in msg
+
+
+def test_an_unrecognised_failure_still_returns_something_readable():
+    assert sheets._explain(RuntimeError("kaboom"))

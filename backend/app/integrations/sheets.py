@@ -106,9 +106,62 @@ def status() -> dict[str, Any]:
     }
 
 
+def _explain(e: BaseException) -> str:
+    """Recover the actionable message gspread throws away.
+
+    `open_by_key` catches a detailed 403 and re-raises a bare `PermissionError`
+    with an empty string, so the two very different causes below arrive looking
+    identical -- and "PermissionError:" in a status panel tells nobody which one
+    they are looking at, or that the fix is two clicks in a console.
+
+    Walks the exception chain for the original API response and names the two
+    failures that actually happen when setting this up.
+    """
+    seen: list[str] = []
+    cur: BaseException | None = e
+    while cur is not None and len(seen) < 5:
+        r = getattr(cur, "response", None)
+        if r is not None:
+            try:
+                msg = r.json().get("error", {}).get("message", "")
+            except Exception:
+                msg = (getattr(r, "text", "") or "")[:300]
+            if msg:
+                seen.append(msg)
+        elif str(cur):
+            seen.append(f"{type(cur).__name__}: {cur}")
+        cur = cur.__cause__ or cur.__context__
+
+    detail = " | ".join(seen) or f"{type(e).__name__}"
+
+    low = detail.lower()
+    if "has not been used in project" in low or "is disabled" in low:
+        return (
+            "The Google Sheets API is not enabled for this project. Enable it "
+            "in the Cloud console, wait a minute, and retry. — " + detail
+        )
+    # Text signals are checked before the exception type, because gspread wraps
+    # every failure in PermissionError -- letting isinstance win would label a
+    # wrong spreadsheet id a sharing problem and send someone to the wrong
+    # console page.
+    if "not found" in low or "404" in low:
+        return (
+            "No spreadsheet with that id is visible to this service account. "
+            "Either SHEETS_ID is wrong, or the sheet has not been shared — "
+            "Google returns 'not found' for both, so check the id first, then "
+            "the sharing. — " + detail
+        )
+    if "permission" in low or "403" in low or isinstance(e, PermissionError):
+        return (
+            "The service account cannot open this spreadsheet. Share the sheet "
+            "with its client_email as an Editor. — " + detail
+        )
+    return detail[:300]
+
+
 def _record_failure(e: Exception) -> None:
     _stats["failures"] += 1
-    _stats["last_error"] = f"{type(e).__name__}: {e}"[:300]
+    _stats["last_error"] = _explain(e)[:400]
 
 
 def push_call(
