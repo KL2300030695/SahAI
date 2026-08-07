@@ -104,6 +104,9 @@ export default function PhoneCall({
         case "ledger":
           onLedger(m.ledger, m.frontier_usd ?? 0);
           break;
+        case "llm_unavailable":
+          setStatus(`${m.message} Still recording the call.`);
+          break;
         case "call_ended":
           setStatus("they hung up");
           break;

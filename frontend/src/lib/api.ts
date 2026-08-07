@@ -1,9 +1,33 @@
 import type { CallDetail, CallSummary, PostCallResult } from "./types";
 
+/**
+ * Unwrap a response, turning a failure into a sentence rather than a status.
+ *
+ * The dashboard used to show "500 Internal Server Error" verbatim when the Groq
+ * daily quota ran out mid-call, which tells an agent with a customer on the
+ * line nothing about whose fault it is or what to do. The server now sends a
+ * plain-English `detail`; this makes sure it survives the trip.
+ */
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status} ${body}`);
+    let message = body;
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed?.detail === "string") message = parsed.detail;
+      else if (Array.isArray(parsed?.detail)) {
+        // FastAPI validation errors arrive as a list of objects.
+        message = parsed.detail
+          .map((d: any) => d?.msg ?? JSON.stringify(d))
+          .join("; ");
+      }
+    } catch {
+      // Not JSON — an unhandled server error, a proxy page, or an empty body.
+      if (!message.trim()) message = res.statusText || "request failed";
+    }
+    // The status only earns its place when the body says nothing useful.
+    const bare = /^internal server error$/i.test(message.trim());
+    throw new Error(bare ? `${res.status} ${message}` : message);
   }
   return res.json() as Promise<T>;
 }

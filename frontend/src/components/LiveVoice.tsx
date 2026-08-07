@@ -87,6 +87,15 @@ export default function LiveVoice({
         case "stt_error":
           setSttError(m.message);
           break;
+        case "llm_unavailable":
+          // The socket stays open and the transcript keeps recording. Say what
+          // still works, because the agent is mid-call and needs to know
+          // whether to keep going or hang up.
+          setStatus("");
+          setSttError(
+            `${m.message} I'm still writing down what they say — you're on your own for the wording until this clears.`,
+          );
+          break;
         case "blocked":
           setSttError(
             m.reason === "consent_not_recorded"

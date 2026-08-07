@@ -57,7 +57,7 @@ from app.crm.db import (
     session_scope,
 )
 from app.crm.models import Call, Customer
-from app.llm.client import get_llm, is_probably_hallucination
+from app.llm.client import LLMUnavailable, get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
 from app.export import (
@@ -103,6 +103,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+@app.exception_handler(LLMUnavailable)
+def _llm_unavailable(request: Request, exc: LLMUnavailable) -> Response:
+    """Report a provider outage as an outage, not as a crash.
+
+    A Groq quota exhaustion used to surface in the dashboard as a bare "500
+    Internal Server Error" with a customer on the line -- which tells the agent
+    nothing about whether the fault was theirs, the customer's, the account's or
+    the code's. 503 with a sentence they can act on is the whole fix.
+    """
+    return Response(
+        content=json.dumps(
+            {
+                "detail": exc.human,
+                "kind": exc.kind,
+                "retry_after_s": exc.retry_after_s,
+            }
+        ),
+        status_code=503,
+        media_type="application/json",
+        headers=(
+            {"Retry-After": str(int(exc.retry_after_s))} if exc.retry_after_s else {}
+        ),
+    )
 
 
 @app.on_event("startup")
@@ -396,6 +422,20 @@ async def ws_call(ws: WebSocket, call_id: str) -> None:
             except ConsentNotGiven as e:
                 await ws.send_json({"type": "blocked", "reason": str(e)})
                 break
+            except LLMUnavailable as e:
+                # Do NOT break. The customer is still talking and the transcript
+                # is still worth keeping; losing the socket as well would turn a
+                # provider outage into a lost call.
+                await ws.send_json(
+                    {
+                        "type": "llm_unavailable",
+                        "kind": e.kind,
+                        "message": e.human,
+                        "retry_after_s": e.retry_after_s,
+                    }
+                )
+                live.history.append(turn)
+                continue
 
             live.history.append(turn)
             if assist.intent:
@@ -643,6 +683,20 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
             except ConsentNotGiven as e:
                 await ws.send_json({"type": "blocked", "reason": str(e)})
                 break
+            except LLMUnavailable as e:
+                # Do NOT break. The customer is still talking and the transcript
+                # is still worth keeping; losing the socket as well would turn a
+                # provider outage into a lost call.
+                await ws.send_json(
+                    {
+                        "type": "llm_unavailable",
+                        "kind": e.kind,
+                        "message": e.human,
+                        "retry_after_s": e.retry_after_s,
+                    }
+                )
+                live.history.append(turn)
+                continue
 
             live.history.append(turn)
             if assist.intent:

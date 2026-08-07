@@ -221,6 +221,82 @@ def is_probably_hallucination(text: str, audio_seconds: float = 0.0) -> bool:
     return False
 
 
+class LLMUnavailable(Exception):
+    """The model provider could not be reached, or refused the request.
+
+    Exists so that a quota or network failure reaches the agent as a sentence
+    they can act on rather than as "500 Internal Server Error" while a customer
+    waits on the line. A Groq `RateLimitError` used to propagate raw: the
+    dashboard showed a bare 500, and nothing on screen said whether the problem
+    was the call, the customer, the account, or the code.
+
+    `retry_after_s` and `human` are populated where the provider tells us; the
+    point is that every caller gets the same shape regardless of which SDK
+    exception was thrown underneath.
+    """
+
+    def __init__(
+        self,
+        human: str,
+        *,
+        kind: str = "provider_error",
+        retry_after_s: Optional[float] = None,
+        detail: str = "",
+    ) -> None:
+        super().__init__(human)
+        self.human = human
+        self.kind = kind
+        self.retry_after_s = retry_after_s
+        self.detail = detail
+
+    @classmethod
+    def from_exception(cls, e: Exception) -> "LLMUnavailable":
+        text = str(e)
+        name = type(e).__name__
+
+        if "rate_limit" in text or name == "RateLimitError" or " 429" in text:
+            wait = None
+            m = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", text)
+            if m:
+                wait = float(m.group(2)) + (60 * int(m.group(1) or 0))
+            daily = "per day" in text or "TPD" in text
+            when = (
+                f" Try again in about {int(wait // 60)}m {int(wait % 60)}s."
+                if wait and not daily
+                else ""
+            )
+            return cls(
+                (
+                    "The daily token allowance on this Groq account is used up, "
+                    "so I can't think about this call until it resets."
+                    if daily
+                    else "The model provider is rate-limiting us right now." + when
+                ),
+                kind="rate_limited",
+                retry_after_s=wait,
+                detail=text[:400],
+            )
+
+        if name in {"APIConnectionError", "APITimeoutError"} or "connect" in text.lower():
+            return cls(
+                "I can't reach the model provider — check the network.",
+                kind="unreachable",
+                detail=text[:400],
+            )
+
+        if name == "AuthenticationError" or " 401" in text:
+            return cls(
+                "The Groq API key was rejected. Check GROQ_API_KEY in .env.",
+                kind="auth",
+                detail=text[:400],
+            )
+
+        return cls(
+            "The model provider returned an error I couldn't recover from.",
+            detail=f"{name}: {text[:400]}",
+        )
+
+
 @dataclass
 class LLMResponse:
     text: str
@@ -349,7 +425,16 @@ class LLMClient:
             usd=price_tokens(model, p_tok, c_tok),
         )
 
-    def _call_with_retry(self, kwargs: dict[str, Any], *, json_mode: bool) -> Any:
+    def _call_with_retry(self, kwargs: dict[str, Any], *, json_mode: bool) -> Any:  # noqa: D401
+        """See `_send`. Wrapped so no provider exception escapes untranslated."""
+        try:
+            return self._send(kwargs, json_mode=json_mode)
+        except LLMUnavailable:
+            raise
+        except Exception as e:  # provider SDK error, or the network
+            raise LLMUnavailable.from_exception(e) from e
+
+    def _send(self, kwargs: dict[str, Any], *, json_mode: bool) -> Any:
         """Send the request, recovering from the one failure mode that actually
         occurs in practice.
 
