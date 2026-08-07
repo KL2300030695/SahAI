@@ -8,7 +8,7 @@ to say — with every figure in it traced back to the clause it came from.
 It never speaks to the customer, and it cannot write to a customer record on its
 own. Both of those are enforced in code, not asked for in a prompt.
 
-**Six agents · five open-weights models · eight guardrails · $0.0044 per call.**
+**Six agents · five open-weights models · eight guardrails · $0.0038 per call.**
 
 ---
 
@@ -220,20 +220,20 @@ choosing different words, not a human dismissing a warning.
 
 ## Cost
 
-**A full 15-turn call costs $0.0044 (₹0.36) — a measured 56× reduction.**
+**A full call costs $0.0038 (₹0.31) — a measured 55× reduction.**
 
 Every figure below comes from the `usage` field of real API responses, priced by
 `backend/app/config.py` and persisted per decision. Nothing is estimated.
 
 | Seed scenario | Stages | Tokens | SahAI | Same tokens, one frontier mega-prompt | |
 |---|---:|---:|---:|---:|---:|
-| `call-001` won / hidden charges | 48 | 34,248 | $0.004393 | $0.248040 | **56×** |
-| `call-002` dropped / Aadhaar | 48 | 31,479 | $0.004547 | $0.218175 | **48×** |
-| `call-003` won / credit score | 54 | 34,389 | $0.004308 | $0.244005 | **57×** |
-| `call-004` dropped / not interested | 31 | 16,020 | $0.001845 | $0.111140 | **60×** |
+| `call-001` won / hidden charges | 47 | 33,615 | $0.004306 | $0.242400 | **56×** |
+| `call-002` dropped / Aadhaar | 48 | 31,527 | $0.004592 | $0.219100 | **48×** |
+| `call-003` won / credit score | 54 | 34,359 | $0.004270 | $0.242300 | **57×** |
+| `call-004` dropped / not interested | 31 | 16,101 | $0.001860 | $0.112600 | **61×** |
 
-Across 22 measured calls including shorter live-mic sessions, the median is
-**$0.0017 (₹0.14)** at a median **53×**. The seed scenarios above are full-length
+The four scenarios average **$0.0038 (₹0.31)** at **55×**. Across 24 measured
+calls including shorter live-mic sessions the median is **53×**. The seed scenarios above are full-length
 calls and sit at the expensive end, which is the honest number to quote.
 
 Where the money goes, across all 22:
@@ -248,7 +248,7 @@ Where the money goes, across all 22:
 | tiny | 88 | 1,551 | 0.000054 | 0.1% |
 | **none** | **169** | — | **0.000000** | **0.0%** |
 
-**169 of 596 stages (28%) cost nothing** — retrieval and six of the eight
+**180 of 633 stages (28%) cost nothing** — retrieval and six of the eight
 guardrails are local compute. That is the concrete form of *"a smaller model or
 a classical method can replace constant LLM calls"*.
 

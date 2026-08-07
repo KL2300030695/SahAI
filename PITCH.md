@@ -77,15 +77,28 @@ unhappy customer into a lost one.
 
 ## Unit economics
 
-Measured from real API responses across the demo calls — not modelled.
+Measured from the `usage` field of real API responses and priced by
+`backend/app/config.py`, then persisted per decision. Nothing is modelled.
 
 | | Per assisted call |
 |---|---|
-| **SahAI** | **$0.0032 (₹0.27)** |
-| Same tokens, one frontier-model mega-prompt | $0.185 (₹15.35) |
-| **Reduction** | **57×** |
+| **SahAI** | **$0.0038 (₹0.31)** |
+| Same tokens, one frontier-model mega-prompt | $0.204 (₹16.93) |
+| **Reduction** | **55×** |
 
-At **10,000 calls/month: $32 vs $1,855.** At 100,000: $320 vs $18,550.
+At **10,000 calls/month: $38 vs $2,040.** At 100,000: $376 vs $20,400.
+
+Per scenario, so the spread is visible rather than averaged away:
+
+| Seed call | Stages | Tokens | SahAI | Mega-prompt | |
+|---|---:|---:|---:|---:|---:|
+| `call-001` won / hidden charges | 47 | 33,615 | $0.004306 | $0.2424 | **56×** |
+| `call-002` dropped / Aadhaar | 48 | 31,527 | $0.004592 | $0.2191 | **48×** |
+| `call-003` won / credit score | 54 | 34,359 | $0.004270 | $0.2423 | **57×** |
+| `call-004` not interested | 31 | 16,101 | $0.001860 | $0.1126 | **61×** |
+
+Reproduce any row: `python -m scripts.run_full_pipeline call-001`, or pull
+`/api/export/trace.csv` and sum the `usd` column.
 
 ### Where the reduction comes from
 
@@ -97,8 +110,8 @@ Three levers, not one:
    trigger logged against every decision.
 2. **RAG instead of inference.** Retrieval is the highest-frequency step in the
    pipeline and costs **$0.00** — local embeddings plus BM25. Six of eight
-   guardrails likewise. In a typical call, **17 pipeline steps run at zero
-   marginal cost.**
+   guardrails likewise. Across the measured calls, **180 of 633 pipeline stages
+   (28%) ran at zero marginal cost.**
 3. **Reasoning-effort control.** The reasoning models bill chain-of-thought as
    output tokens. Measured on an identical prompt: `low` = 150 completion
    tokens, `medium` = 334 — 2.2× the cost for the same answer.
@@ -133,7 +146,8 @@ figure the grounding guardrail exists to block.
 
 **Near term**
 - A/B the co-pilot against unassisted agents to get a real conversion delta
-- Live mic streaming (Whisper already works on uploaded audio)
+- Ground non-numeric claims — figures are verified against source, but a
+  sentence like "we never share your Aadhaar" contains none
 - Redis-backed session state so the socket can be served by any worker
 - Push the KB to the live product CMS so terms sync automatically
 
