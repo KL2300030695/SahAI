@@ -439,3 +439,60 @@ def check_injection(flagged: bool, score: float = 0.0) -> CheckResult:
         enforced_by="llm",
         severity=Severity.BLOCK if flagged else Severity.INFO,
     )
+
+
+def check_figures_in_source(text: str, source_text: str) -> CheckResult:
+    """Every figure in a summary must appear in the call it summarises.
+
+    The right grounding question for an internal note is not "is this in the
+    handbook?" but "was this actually said?". Running the KB check on a summary
+    was a guaranteed false positive: post-call retrieval passes no citations, so
+    any summary mentioning a number failed, and "1 check stopped this" appeared
+    on nearly every call. A guardrail that cries wolf on ordinary output trains
+    the agent to stop reading the panel, which costs more than it saves.
+
+    What it does catch is real and worth catching: a summariser inventing a
+    figure nobody said -- writing "agreed to a Rs 5,000 limit" into a customer's
+    record when no such number appears anywhere in the transcript.
+    """
+    figures = _numeric_claims(text)
+    if not figures:
+        return CheckResult(
+            name=CheckName.GROUNDING,
+            passed=True,
+            detail="No figures in the summary; nothing to check.",
+            enforced_by="code",
+        )
+
+    # Compare figure-to-figure rather than searching one concatenated digit
+    # string. Flattening a whole transcript to digits makes "1" followed by "99"
+    # satisfy a claim of "199", which would let an invented number through --
+    # the one thing this check exists to stop.
+    source_figures = {_normalise_number(f) for f in _numeric_claims(source_text or "")}
+    raw = (source_text or "").lower()
+    missing = [
+        f
+        for f in figures
+        if _normalise_number(f) not in source_figures and f.lower() not in raw
+    ]
+    if missing:
+        return CheckResult(
+            name=CheckName.GROUNDING,
+            passed=False,
+            detail=(
+                f"Summary states {len(missing)} figure(s) that appear nowhere in "
+                f"the call: {', '.join(missing)}. A record must not contain "
+                "numbers nobody said."
+            ),
+            enforced_by="code",
+            severity=Severity.BLOCK,
+        )
+    return CheckResult(
+        name=CheckName.GROUNDING,
+        passed=True,
+        detail=(
+            f"All {len(figures)} figure(s) in the summary appear in the "
+            "transcript."
+        ),
+        enforced_by="code",
+    )

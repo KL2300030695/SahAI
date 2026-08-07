@@ -298,9 +298,17 @@ export function EvidenceStrip({
           className="text-[12.5px]"
           style={{ color: failed ? "var(--halt)" : "var(--verified)" }}
         >
+          {/* States what the checks found, not what was done about it.
+              This used to read "N checks stopped this" whenever anything
+              failed — and appeared above a call that had been signed off and
+              written, because a failed check on an internal summary blocks
+              nothing customer-facing. A strip that announces a stoppage that
+              did not happen is worse than one that says less: the Say Line and
+              the approval band already report consequences, and they are the
+              two places that actually know. */}
           {checks.length
             ? failed
-              ? `${failed} check${failed > 1 ? "s" : ""} stopped this`
+              ? `${failed} check${failed > 1 ? "s" : ""} failed`
               : `${checks.length} checks passed`
             : "Checks idle"}
         </span>

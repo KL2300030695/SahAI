@@ -397,6 +397,16 @@ class CheckIn(BaseModel):
     consent_ack: bool = False
     injection_flagged: bool = False
     stage: Literal["live_turn", "post_call"] = "live_turn"
+    source_text: str = Field(
+        "",
+        description=(
+            "What a post-call summary is allowed to draw figures from -- the "
+            "call transcript. A summary's numbers come from the conversation, "
+            "not the knowledge base, so grounding one against KB chunks (of "
+            "which post-call has none) failed every summary that mentioned any "
+            "number. Ignored for live turns, which ground against citations."
+        ),
+    )
     customer_facing: bool = Field(
         True,
         description="Whether this artefact will be seen by the customer. Internal "

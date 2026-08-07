@@ -660,3 +660,61 @@ def test_trim_preserves_a_negation_it_cannot_safely_shorten():
     )
     out = _trim_to_sentence(say)
     assert "never upload or share" in out
+
+
+# ---------------------------------------------------------------------------
+# Post-call grounding is a different question from live-turn grounding
+#
+# A live suggestion must be traceable to the handbook. A summary must be
+# traceable to the call. Asking the first question of a summary failed every
+# summary that mentioned a number, because post-call retrieval passes no
+# citations -- and the dashboard then reported a stopped check above a call that
+# had been signed off and written.
+# ---------------------------------------------------------------------------
+
+_TRANSCRIPT = (
+    "Customer: is there any hidden charge? Agent: no, it is zero cost. There is "
+    "a Rs 199 late fee if you miss a payment. Customer: fine, three months works."
+)
+
+
+def test_a_summary_may_quote_figures_from_the_call():
+    r = rules.check_figures_in_source(
+        "Arun asked about hidden charges. Confirmed the Rs 199 late fee.", _TRANSCRIPT
+    )
+    assert r.passed, r.detail
+
+
+def test_a_summary_with_no_figures_passes():
+    assert rules.check_figures_in_source("Customer converted after KYC.", _TRANSCRIPT).passed
+
+
+def test_a_summary_cannot_invent_a_figure_nobody_said():
+    """The failure actually worth catching: a number written into a record."""
+    r = rules.check_figures_in_source(
+        "Agreed to a Rs 5,000 limit for the customer.", _TRANSCRIPT
+    )
+    assert not r.passed
+    assert "5,000" in r.detail
+
+
+def test_digits_are_not_flattened_across_the_whole_transcript():
+    """"Rs 1" and "Rs 99" in the source must not satisfy a claim of "Rs 199".
+
+    Searching one concatenated digit string would let an invented figure through
+    whenever its digits happened to appear consecutively somewhere in the call,
+    which is the single thing this check exists to stop.
+    """
+    r = rules.check_figures_in_source("A Rs 199 charge applies.", "We discussed Rs 1 and Rs 99.")
+    assert not r.passed
+
+
+def test_the_old_kb_check_would_have_failed_all_of_these():
+    """Pins the bug, so nobody re-points post-call at the knowledge base.
+
+    check_grounding with no citations -- exactly what post-call passed -- fails
+    any text containing a figure, however ordinary.
+    """
+    ordinary = "Arun asked about hidden charges. Confirmed the Rs 199 late fee."
+    assert not rules.check_grounding(ordinary, [], []).passed
+    assert rules.check_figures_in_source(ordinary, _TRANSCRIPT).passed

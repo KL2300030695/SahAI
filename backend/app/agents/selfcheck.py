@@ -95,14 +95,27 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
         # placeholder containing no digits — so it is correctly reported as a
         # PII event, and does not also surface as a phantom "ungrounded figure"
         # blaming the model for a number the customer themselves supplied.
-        checks.append(
-            rules.check_grounding(redaction.text, inp.cited_chunk_ids, inp.citations)
-        )
-        # Same computation the check just ran, kept rather than discarded, so
-        # the interface can mark sourced figures inside the sentence itself.
-        grounded_spans, _ = rules.ground_figures(
-            redaction.text, inp.cited_chunk_ids, inp.citations
-        )
+        # A live suggestion is grounded against the knowledge base; a post-call
+        # summary is grounded against the call it summarises. Asking "is this in
+        # the handbook?" of a summary was a guaranteed false positive -- post-call
+        # retrieval passes no citations, so every summary mentioning any number
+        # failed, and the interface reported a stopped check on nearly every call.
+        if inp.stage == "post_call":
+            checks.append(
+                rules.check_figures_in_source(redaction.text, inp.source_text)
+            )
+            grounded_spans: list = []
+        else:
+            checks.append(
+                rules.check_grounding(
+                    redaction.text, inp.cited_chunk_ids, inp.citations
+                )
+            )
+            # Same computation the check just ran, kept rather than discarded, so
+            # the interface can mark sourced figures inside the sentence itself.
+            grounded_spans, _ = rules.ground_figures(
+                redaction.text, inp.cited_chunk_ids, inp.citations
+            )
         checks.append(
             rules.check_stale_terms(
                 inp.citations, inp.cited_chunk_ids, dropped_stale=dropped_stale

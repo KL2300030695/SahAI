@@ -345,6 +345,8 @@ class Orchestrator:
                 injection_flagged=False,
                 stage="post_call",
                 customer_facing=has_draft,
+                # What the summary is allowed to draw figures from.
+                source_text=" ".join(t.text for t in transcript),
             ),
             meter=meter,
             escalated=True,
