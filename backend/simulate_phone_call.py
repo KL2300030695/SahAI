@@ -25,6 +25,8 @@ import asyncio
 import base64
 import json
 import sys
+import urllib.error
+import urllib.parse
 import wave
 from pathlib import Path
 
@@ -87,15 +89,47 @@ async def main() -> int:
               file=sys.stderr)
         return 2
 
+    import base64
+    import hashlib
+    import hmac
     import urllib.request
 
+    from app.config import get_settings
+
     # 1. The carrier fetches the TwiML webhook when the call connects.
-    body = b"From=%2B919845033127&To=%2B18005550100&CallSid=CAsimulated0001"
-    req = urllib.request.Request(
-        f"{BASE_HTTP}/api/telephony/voice", data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    #
+    # Signed exactly as Twilio signs it. Once TWILIO_AUTH_TOKEN is set the
+    # webhook rejects unsigned requests with a 403 -- which is the point of the
+    # check -- so a simulator that skipped this would stop working the moment
+    # the security control it is meant to exercise was switched on.
+    webhook_url = f"{BASE_HTTP}/api/telephony/voice"
+    params = {
+        "From": "+919845033127",
+        "To": "+18005550100",
+        "CallSid": "CAsimulated0001",
+    }
+    body = urllib.parse.urlencode(params).encode()
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    token = get_settings().twilio_auth_token
+    if token:
+        payload = webhook_url + "".join(f"{k}{params[k]}" for k in sorted(params))
+        headers["X-Twilio-Signature"] = base64.b64encode(
+            hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()
+        ).decode()
+
+    req = urllib.request.Request(webhook_url, data=body, headers=headers)
     try:
         twiml = urllib.request.urlopen(req).read().decode()
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print("Webhook rejected the signature (403).", file=sys.stderr)
+            print("The TWILIO_AUTH_TOKEN in .env must match the one the server "
+                  "loaded — restart the backend after changing it.", file=sys.stderr)
+        else:
+            print(f"TwiML webhook failed: HTTP {e.code} {e.read().decode()[:200]}",
+                  file=sys.stderr)
+        return 1
     except Exception as e:
         print(f"TwiML webhook failed: {e}", file=sys.stderr)
         print("Is PUBLIC_BASE_URL set in .env? The webhook needs it to build a "
