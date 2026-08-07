@@ -60,6 +60,13 @@ from app.crm.models import Call, Customer
 from app.llm.client import get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
+from app.export import (
+    CALL_COLUMNS,
+    TRACE_COLUMNS,
+    call_rows,
+    to_csv,
+    trace_rows,
+)
 from app.guardrails import rules
 from app.schemas import (
     CheckName,
@@ -1355,3 +1362,46 @@ async def audio_turn(
         "ledger": json.loads(live.meter.ledger().model_dump_json()),
         "frontier_usd": live.meter.frontier_baseline_usd(),
     }
+
+
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/export/calls.csv")
+def export_calls(call_id: Optional[str] = None) -> Response:
+    """One row per call: what happened, what was written, who signed it off.
+
+    The automation boundary is legible in the columns. Everything up to
+    `followup_body` is produced without a human; `send_status`, `approved_by`
+    and `approved_at` are the only fields no agent can set.
+    """
+    with session_scope() as s:
+        body = to_csv(CALL_COLUMNS, call_rows(s, call_id))
+    name = f"sahai-calls-{call_id or 'all'}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/export/trace.csv")
+def export_trace(call_id: Optional[str] = None) -> Response:
+    """One row per pipeline stage, in order, with what it cost.
+
+    This is the end-to-end trace: every stage a call passed through, the tier
+    and model it used, a one-line summary of what went in and came out, real
+    token counts from the API response, and the priced cost. Summing `usd` for
+    a call_id reproduces the cost-per-call figure exactly -- nothing here is
+    estimated.
+    """
+    with session_scope() as s:
+        body = to_csv(TRACE_COLUMNS, trace_rows(s, call_id))
+    name = f"sahai-trace-{call_id or 'all'}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )

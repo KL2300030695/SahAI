@@ -29,6 +29,30 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 def init_db() -> None:
     (BACKEND_DIR / "data").mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Add columns introduced after a database was already created.
+
+    `create_all` creates missing *tables* and silently ignores missing *columns*,
+    so a dev database that predates a new field keeps working until the first
+    query mentions it and then fails with a bare OperationalError. This is a
+    hackathon, not a project with Alembic; an idempotent ADD COLUMN is the honest
+    amount of migration machinery for one additive change.
+    """
+    from sqlalchemy import inspect, text
+
+    wanted = {"cost_rows": {"note": "TEXT DEFAULT ''"}}
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, columns in wanted.items():
+            if not insp.has_table(table):
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 @contextmanager
@@ -101,6 +125,7 @@ def record_cost(s: Session, d: DecisionCost) -> None:
             usd=d.usd,
             latency_ms=d.latency_ms,
             escalation_trigger=d.escalation_trigger,
+            note=d.note,
         )
     )
 

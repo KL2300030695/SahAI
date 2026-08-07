@@ -95,7 +95,19 @@ Output JSON only. No prose, no code fences.
 """
 
 
-def _format_citations(citations: list[Citation]) -> str:
+def _format_citations(citations: list[Citation], no_match: bool = False) -> str:
+    if no_match:
+        # Said explicitly, because "empty" and "searched and found nothing" are
+        # different situations and only one of them warrants promising to check.
+        return (
+            "(THE KNOWLEDGE BASE WAS SEARCHED AND NOTHING MATCHED THIS QUESTION "
+            "WELL ENOUGH TO QUOTE.\n"
+            "You therefore have NO source for any product fact right now. Do not "
+            "answer the question from memory, do not approximate, and do not "
+            "reason it out from what you know about similar products. Tell the "
+            "customer plainly that you want to give them the exact answer and "
+            "will confirm it, then continue the conversation.)"
+        )
     if not citations:
         return "(none retrieved — do not state any specific figure)"
     blocks = []
@@ -175,7 +187,7 @@ RECENT CONVERSATION:
 {recent}
 
 KNOWLEDGE BASE EXCERPTS — the ONLY source you may quote figures from:
-{_format_citations(inp.citations)}
+{_format_citations(inp.citations, inp.no_confident_match)}
 
 Write the agent's next line. Respond with JSON only."""
 

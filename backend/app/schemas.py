@@ -217,6 +217,20 @@ class RetrievalOut(BaseModel):
     dropped_stale: list[str] = Field(
         default_factory=list, description="chunk_ids filtered for being out of date."
     )
+    no_confident_match: bool = Field(
+        False,
+        description=(
+            "A lookup ran and nothing cleared the similarity floor. `citations` "
+            "is empty by design -- the reasoning model is given no source text "
+            "rather than weak source text plus a warning it can ignore."
+        ),
+    )
+    skipped: bool = Field(
+        False, description="The turn needed no lookup at all (chit-chat)."
+    )
+    best_score: float = Field(
+        0.0, description="Best cosine similarity seen, for the trace and the UI."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +265,16 @@ class NBAIn(BaseModel):
     recent_turns: list[TranscriptTurn] = Field(default_factory=list)
     dropoff_risk: float = 0.0
     sentiment: Sentiment = Sentiment.NEUTRAL
+    no_confident_match: bool = Field(
+        False,
+        description=(
+            "The knowledge base was searched and nothing matched well enough. "
+            "Stated rather than left implicit: an empty citation list looks "
+            "identical to a turn that needed no lookup, and the model fills that "
+            "silence from its own memory -- which is exactly how 'Pay-in-3 is "
+            "entirely free' reached a customer."
+        ),
+    )
 
 
 class NBAOut(BaseModel):
@@ -437,6 +461,14 @@ class DecisionCost(BaseModel):
     latency_ms: float = 0.0
     escalation_trigger: Optional[str] = Field(
         None, description="Why this decision was routed to a more expensive tier."
+    )
+    note: str = Field(
+        "",
+        description=(
+            "What went into this stage and what came out, in one line. Written by "
+            "the orchestrator rather than the agent: agents do not know they are "
+            "part of a pipeline, and the trace is a property of the pipeline."
+        ),
     )
     at: datetime = Field(default_factory=_utcnow)
 

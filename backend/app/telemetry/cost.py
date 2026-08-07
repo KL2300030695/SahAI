@@ -53,6 +53,19 @@ class CostMeter:
         self.rows.append(row)
         return row
 
+    def annotate(self, agent: str, note: str) -> None:
+        """Attach an input→output summary to the most recent row for `agent`.
+
+        Called by the orchestrator, never by an agent. Agents do not know they
+        sit in a pipeline -- that is the property that lets them be tested and
+        re-tiered in isolation -- so the stage trace is written by the one
+        module that does know the shape.
+        """
+        for row in reversed(self.rows):
+            if row.agent == agent:
+                row.note = note
+                return
+
     def record_local(
         self,
         agent: str,

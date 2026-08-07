@@ -126,4 +126,5 @@ class CostRow(Base):
     usd: Mapped[float] = mapped_column(Float, default=0.0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     escalation_trigger: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
     at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

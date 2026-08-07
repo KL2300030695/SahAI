@@ -27,7 +27,7 @@ from app.agents.intent import IntentAgent
 from app.agents.nba import NextBestActionAgent
 from app.agents.selfcheck import SelfCheckAgent
 from app.guardrails.pii import redact_text
-from app.rag.retriever import build_query, retrieve
+from app.rag.retriever import MIN_COSINE, build_query, retrieve
 from app.schemas import (
     ActionType,
     CheckIn,
@@ -112,6 +112,11 @@ class Orchestrator:
             ScreenIn(utterance=turn.text), meter=meter, turn_index=turn.index
         )
         tier_path.append(ModelTier.TINY.value)
+        meter.annotate(
+            "injection_screen",
+            f"utterance({len(turn.text)} chars) -> attack={screen.is_attack} "
+            f"score={screen.score:.4f}",
+        )
 
         if screen.is_attack:
             # Stop here. The utterance never reaches a reasoning model, so there
@@ -150,6 +155,14 @@ class Orchestrator:
             turn_index=turn.index,
         )
         tier_path.append(ModelTier.CHEAP.value)
+        meter.annotate(
+            "intent",
+            f"window({len(window)} turns) -> {intent_out.intent.value} "
+            f"conf={intent_out.confidence:.2f} "
+            f"sentiment={intent_out.sentiment.value} "
+            f"dropoff={intent_out.dropoff_risk:.2f} "
+            f"entities={list(intent_out.entities) or '[]'}",
+        )
 
         # --- 3. retrieval (NONE — local, zero cost) --------------------
         rag_started = time.perf_counter()
@@ -162,12 +175,24 @@ class Orchestrator:
                 k=4,
             )
         )
+        if retrieval.skipped:
+            rag_note = "skipped — chit-chat, nothing to look up"
+        elif retrieval.no_confident_match:
+            rag_note = (
+                f"NO CONFIDENT MATCH (best {retrieval.best_score:.3f} < "
+                f"{MIN_COSINE}) — no source text passed downstream"
+            )
+        else:
+            rag_note = (
+                f"{len(retrieval.citations)} chunks (best "
+                f"{retrieval.best_score:.3f}), "
+                f"{len(retrieval.dropped_stale)} stale dropped"
+            )
         meter.record_local(
             "retrieval",
             latency_ms=(time.perf_counter() - rag_started) * 1000,
             turn_index=turn.index,
-            note=f"{len(retrieval.citations)} chunks, "
-            f"{len(retrieval.dropped_stale)} stale dropped",
+            note=rag_note,
         )
         tier_path.append(ModelTier.NONE.value)
 
@@ -180,6 +205,7 @@ class Orchestrator:
             recent_turns=window[-4:],
             dropoff_risk=intent_out.dropoff_risk,
             sentiment=intent_out.sentiment,
+            no_confident_match=retrieval.no_confident_match,
         )
         # Route once, then hand the decision to the agent. Routing here rather
         # than inside run() keeps the tier visible to the UI and guarantees the
@@ -194,6 +220,16 @@ class Orchestrator:
         )
         tier_path.append(chosen_tier.value)
         escalated = chosen_tier == ModelTier.HIGH
+        meter.annotate(
+            "next_best_action",
+            f"intent={intent_out.intent.value} "
+            f"citations={len(retrieval.citations)} -> "
+            f"{nba_out.action_type.value}, "
+            f"say({len(nba_out.say.split())}w), "
+            f"cites={nba_out.cited_chunk_ids or '[]'}, "
+            f"confirm={nba_out.requires_human_confirmation}"
+            + (f" [escalated: {trigger}]" if trigger else ""),
+        )
 
         # --- 5. self-check (code, then SAFETY/HIGH) -------------------
         guard = self.selfcheck.run(
@@ -214,6 +250,20 @@ class Orchestrator:
         )
         tier_path.append(
             (ModelTier.HIGH if escalated else ModelTier.SAFETY).value
+        )
+        _failed = [c.name.value for c in guard.checks if not c.passed]
+        meter.annotate(
+            "self_check",
+            f"say + {len(retrieval.citations)} citations -> "
+            f"passed={guard.passed}, {len(guard.checks)} checks, "
+            f"failed={_failed or '[]'}, "
+            f"grounded_spans={len(guard.grounded_spans)}",
+        )
+        meter.annotate(
+            "self_check:code",
+            f"deterministic checks -> "
+            f"{sum(1 for c in guard.checks if c.enforced_by == 'code')} run, "
+            f"failed={[c.name.value for c in guard.checks if c.enforced_by == 'code' and not c.passed] or '[]'}",
         )
 
         # Apply the guardrail's decisions to the suggestion before it ships.
@@ -266,6 +316,16 @@ class Orchestrator:
             meter=meter,
             do_not_call=do_not_call,
         )
+        meter.annotate(
+            "crm_followup",
+            f"transcript({len(transcript)} turns), "
+            f"intents={sorted({i.value for i in intents_seen}) or '[]'} -> "
+            f"disposition={crm_out.disposition.value}, "
+            f"drop_off={crm_out.dropoff_reason is not None}, "
+            f"patch={list(crm_out.crm_patch) or '[]'}, "
+            f"followup={crm_out.followup_draft.channel if crm_out.followup_draft else 'none'}, "
+            f"send_status={crm_out.send_status.value}",
+        )
 
         # The follow-up draft is the only customer-facing artefact here. When
         # there is none -- the customer converted, or opted out -- the summary
@@ -289,6 +349,14 @@ class Orchestrator:
             meter=meter,
             escalated=True,
         )
+        meter.annotate(
+            "self_check",
+            f"{'follow-up draft' if has_draft else 'internal summary'} "
+            f"({len(candidate.split())}w, customer_facing={has_draft}) -> "
+            f"passed={guard.passed}, "
+            f"failed={[c.name.value for c in guard.checks if not c.passed] or '[]'}",
+        )
+
         if guard.redacted_say and crm_out.followup_draft:
             crm_out.followup_draft.body = guard.redacted_say
 
