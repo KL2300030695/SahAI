@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from app.config import CREDIT_TERM_PATTERNS
-from app.schemas import Intent, ModelTier
+from app.schemas import Intent, ModelTier, Sentiment
 
 _CREDIT_RE = re.compile("|".join(CREDIT_TERM_PATTERNS), re.IGNORECASE)
 
@@ -27,6 +27,11 @@ SENSITIVE_INTENTS = {
     Intent.ELIGIBILITY,
     Intent.OBJECTION_TRUST,
     Intent.OBJECTION_COST,
+    # A caller with a problem is the easiest person in the world to lose, and
+    # the hardest turn to get right -- the correct move is usually to stop
+    # selling and route them, which is exactly what a cheap model gets wrong.
+    Intent.COMPLAINT,
+    Intent.PAYMENT_ISSUE,
 }
 
 DROPOFF_ESCALATION_THRESHOLD = 0.6
@@ -47,6 +52,7 @@ class RouteContext:
     dropoff_risk: float
     text: str = ""
     agent_requested: bool = False
+    sentiment: Sentiment = Sentiment.NEUTRAL
 
 
 def mentions_credit_terms(text: str) -> bool:
@@ -79,6 +85,12 @@ ESCALATION_RULES: list[EscalationRule] = [
         why=f"Intent confidence below {LOW_CONFIDENCE_THRESHOLD:.2f} — the cheap "
         "classifier is unsure, so do not build a suggestion on it.",
         predicate=lambda c: c.confidence < LOW_CONFIDENCE_THRESHOLD,
+    ),
+    EscalationRule(
+        name="negative_sentiment",
+        why="Customer sounds frustrated or angry — the wrong sentence here loses "
+        "them permanently, and a cheap model reaches for a script.",
+        predicate=lambda c: c.sentiment in {Sentiment.FRUSTRATED, Sentiment.ANGRY},
     ),
     EscalationRule(
         name="agent_requested",

@@ -45,6 +45,7 @@ from app.schemas import (
     RetrievalIn,
     RetrievalOut,
     ScreenIn,
+    Sentiment,
     Severity,
     Speaker,
     TranscriptTurn,
@@ -178,6 +179,7 @@ class Orchestrator:
             crm=crm,
             recent_turns=window[-4:],
             dropoff_risk=intent_out.dropoff_risk,
+            sentiment=intent_out.sentiment,
         )
         # Route once, then hand the decision to the agent. Routing here rather
         # than inside run() keeps the tier visible to the UI and guarantees the
@@ -248,6 +250,8 @@ class Orchestrator:
         consent_ack: bool,
         crm: Optional[CRMSnapshot] = None,
         do_not_call: bool = False,
+        sentiments_seen: Optional[list[Sentiment]] = None,
+        buying_signals: Optional[list[str]] = None,
     ) -> PostCallResult:
         crm_out = self.crm.run(
             CRMIn(
@@ -255,6 +259,8 @@ class Orchestrator:
                 transcript=transcript,
                 intents_seen=intents_seen,
                 max_dropoff_risk=max_dropoff_risk,
+                sentiments_seen=sentiments_seen or [],
+                buying_signals=buying_signals or [],
                 crm=crm,
             ),
             meter=meter,

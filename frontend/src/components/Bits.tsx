@@ -66,6 +66,37 @@ export function Meter({
   );
 }
 
+/** Sentiment chip. Negative states are visually loud on purpose — they change
+ *  what the agent should do next, so they must not read as decoration. */
+export function SentimentChip({ sentiment }: { sentiment: string }) {
+  const style: Record<string, string> = {
+    interested: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/40",
+    happy: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/40",
+    neutral: "bg-slate-700/40 text-slate-300 ring-slate-500/40",
+    confused: "bg-sky-500/15 text-sky-300 ring-sky-500/40",
+    hesitant: "bg-amber-500/15 text-amber-300 ring-amber-500/40",
+    busy: "bg-amber-500/15 text-amber-300 ring-amber-500/40",
+    frustrated: "bg-orange-500/20 text-orange-300 ring-orange-500/50",
+    angry: "bg-rose-500/20 text-rose-300 ring-rose-500/50",
+  };
+  return (
+    <span className={`chip ${style[sentiment] ?? style.neutral}`}>
+      {sentiment}
+    </span>
+  );
+}
+
+export function ProbabilityChip({ value }: { value: string }) {
+  const style: Record<string, string> = {
+    high: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/40",
+    medium: "bg-amber-500/15 text-amber-300 ring-amber-500/40",
+    low: "bg-slate-700/40 text-slate-400 ring-slate-600",
+  };
+  return (
+    <span className={`chip ${style[value] ?? style.low}`}>{value}</span>
+  );
+}
+
 export function Spinner() {
   return (
     <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />

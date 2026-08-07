@@ -90,8 +90,51 @@ class Intent(str, Enum):
     OBJECTION_TRUST = "objection_trust"
     DROPOFF_RISK = "dropoff_risk"
     READY_TO_CONVERT = "ready_to_convert"
+    # A caller with a problem is not a sales opportunity. Without these two the
+    # classifier had nowhere to put "I'm calling about the AC I bought
+    # yesterday" -- it landed on `other`, and the assistant cheerfully suggested
+    # closing the call. Naming the intent is what lets the system stop selling.
+    COMPLAINT = "complaint"
+    PAYMENT_ISSUE = "payment_issue"
     SMALLTALK = "smalltalk"
     OTHER = "other"
+
+
+class Sentiment(str, Enum):
+    INTERESTED = "interested"
+    HAPPY = "happy"
+    NEUTRAL = "neutral"
+    CONFUSED = "confused"
+    HESITANT = "hesitant"
+    BUSY = "busy"
+    FRUSTRATED = "frustrated"
+    ANGRY = "angry"
+
+    @property
+    def needs_care(self) -> bool:
+        """Sentiments where pushing the sale is the wrong move."""
+        return self in {Sentiment.FRUSTRATED, Sentiment.ANGRY, Sentiment.BUSY}
+
+
+class ConversionProbability(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class InterestLevel(str, Enum):
+    HOT = "hot"
+    WARM = "warm"
+    COLD = "cold"
+
+
+class FollowUpTiming(str, Enum):
+    NONE = "none"
+    IMMEDIATE = "within_2_hours"
+    SAME_DAY = "within_24_hours"
+    TOMORROW = "tomorrow_morning"
+    WEEKEND = "weekend"
+    AFTER_SALARY = "after_salary_date"
 
 
 class IntentIn(BaseModel):
@@ -108,6 +151,17 @@ class IntentOut(BaseModel):
     )
     dropoff_risk: float = Field(
         0.0, ge=0.0, le=1.0, description="Drives post-call follow-up targeting."
+    )
+    sentiment: Sentiment = Field(
+        Sentiment.NEUTRAL,
+        description="How the customer sounds. Drives tone, and stops the "
+        "assistant pitching at someone who is angry or in a hurry.",
+    )
+    buying_signals: list[str] = Field(
+        default_factory=list,
+        description="Verbatim phrases indicating purchase intent — 'how fast is "
+        "approval', 'I can afford that'. Surfaced so the agent knows when to "
+        "stop explaining and start closing.",
     )
     escalate: bool = Field(
         False,
@@ -196,6 +250,7 @@ class NBAIn(BaseModel):
     crm: Optional[CRMSnapshot] = None
     recent_turns: list[TranscriptTurn] = Field(default_factory=list)
     dropoff_risk: float = 0.0
+    sentiment: Sentiment = Sentiment.NEUTRAL
 
 
 class NBAOut(BaseModel):
@@ -247,6 +302,8 @@ class CRMIn(BaseModel):
     transcript: list[TranscriptTurn]
     intents_seen: list[Intent] = Field(default_factory=list)
     max_dropoff_risk: float = 0.0
+    sentiments_seen: list[Sentiment] = Field(default_factory=list)
+    buying_signals: list[str] = Field(default_factory=list)
     crm: Optional[CRMSnapshot] = None
 
 
@@ -258,6 +315,18 @@ class CRMOut(BaseModel):
     )
     disposition: Disposition = Disposition.CALLBACK
     dropoff_reason: Optional[str] = None
+
+    # --- structured note fields -----------------------------------------
+    # A colleague picking this account up cold needs to know what was asked,
+    # what was pushed back on, and when to call again -- not just a paragraph.
+    questions_asked: list[str] = Field(default_factory=list)
+    objections: list[str] = Field(default_factory=list)
+    interest_level: InterestLevel = InterestLevel.COLD
+    conversion_probability: ConversionProbability = ConversionProbability.LOW
+    conversion_rationale: str = ""
+    followup_timing: FollowUpTiming = FollowUpTiming.NONE
+    sentiment: Sentiment = Sentiment.NEUTRAL
+
     followup_draft: Optional[FollowUpDraft] = None
     send_status: SendStatus = SendStatus.PENDING_AGENT_APPROVAL
 

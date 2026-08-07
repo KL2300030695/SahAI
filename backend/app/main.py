@@ -60,7 +60,7 @@ from app.crm.models import Call, Customer
 from app.llm.client import get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
-from app.schemas import Intent, ModelTier, Speaker, TranscriptTurn
+from app.schemas import Intent, ModelTier, Sentiment, Speaker, TranscriptTurn
 from app.telemetry.cost import CostMeter
 from app.telephony.audio import UtteranceBuffer
 from app.telephony.twilio import (
@@ -111,6 +111,8 @@ class LiveCall:
         self.consent_at: Optional[datetime] = None
         self.history: list[TranscriptTurn] = []
         self.intents_seen: list[Intent] = []
+        self.sentiments_seen: list[Sentiment] = []
+        self.buying_signals: list[str] = []
         self.max_dropoff_risk = 0.0
         self.meter = CostMeter(call_id)
         self.assists: list[dict[str, Any]] = []
@@ -124,6 +126,23 @@ class LiveCall:
         self.source: str = "browser"  # browser | phone | scripted
         self.phone_number: str = ""
         self.ended: bool = False
+
+    def observe(self, assist: Any) -> None:
+        """Accumulate per-turn signals the post-call summariser needs.
+
+        One method rather than repeating the same four lines at each of the
+        scripted, browser-mic, upload and telephony call sites -- which is how
+        the sentiment and buying-signal fields would otherwise have been added
+        to three of them and quietly forgotten in the fourth.
+        """
+        if not assist.intent:
+            return
+        self.intents_seen.append(assist.intent.intent)
+        self.sentiments_seen.append(assist.intent.sentiment)
+        self.buying_signals.extend(assist.intent.buying_signals)
+        self.max_dropoff_risk = max(
+            self.max_dropoff_risk, assist.intent.dropoff_risk
+        )
 
     def publish(self, message: dict[str, Any]) -> None:
         for q in list(self.subscribers):
@@ -364,10 +383,7 @@ async def ws_call(ws: WebSocket, call_id: str) -> None:
 
             live.history.append(turn)
             if assist.intent:
-                live.intents_seen.append(assist.intent.intent)
-                live.max_dropoff_risk = max(
-                    live.max_dropoff_risk, assist.intent.dropoff_risk
-                )
+                live.observe(assist)
 
             payload = json.loads(assist.model_dump_json())
             live.assists.append(payload)
@@ -614,10 +630,7 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
 
             live.history.append(turn)
             if assist.intent:
-                live.intents_seen.append(assist.intent.intent)
-                live.max_dropoff_risk = max(
-                    live.max_dropoff_risk, assist.intent.dropoff_risk
-                )
+                live.observe(assist)
 
             payload = json.loads(assist.model_dump_json())
             live.assists.append(payload)
@@ -850,8 +863,7 @@ async def ws_telephony(ws: WebSocket) -> None:
         )
         live.history.append(turn)
         if assist.intent:
-            live.intents_seen.append(assist.intent.intent)
-            live.max_dropoff_risk = max(live.max_dropoff_risk, assist.intent.dropoff_risk)
+            live.observe(assist)
 
         payload = json.loads(assist.model_dump_json())
         live.assists.append(payload)
@@ -1016,6 +1028,8 @@ def finalise(call_id: str) -> dict:
         consent_ack=live.consent_ack,
         crm=crm,
         do_not_call=dnc,
+        sentiments_seen=live.sentiments_seen,
+        buying_signals=live.buying_signals,
     )
 
     payload = json.loads(result.model_dump_json())
@@ -1252,8 +1266,7 @@ async def audio_turn(
     )
     live.history.append(turn)
     if assist.intent:
-        live.intents_seen.append(assist.intent.intent)
-        live.max_dropoff_risk = max(live.max_dropoff_risk, assist.intent.dropoff_risk)
+        live.observe(assist)
 
     payload = json.loads(assist.model_dump_json())
     live.assists.append(payload)

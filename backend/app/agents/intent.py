@@ -18,7 +18,14 @@ import json
 from typing import Optional
 
 from app.agents.base import Agent
-from app.schemas import Intent, IntentIn, IntentOut, ModelTier, TranscriptTurn
+from app.schemas import (
+    Intent,
+    IntentIn,
+    IntentOut,
+    ModelTier,
+    Sentiment,
+    TranscriptTurn,
+)
 from app.telemetry.cost import CostMeter
 
 SYSTEM = """\
@@ -27,13 +34,18 @@ PayFlex Pay-in-3, a zero-cost 3-instalment payment product.
 
 Return ONLY a JSON object with exactly these keys:
   intent          one of: pricing, eligibility, kyc_steps, objection_cost,
-                  objection_trust, dropoff_risk, ready_to_convert, smalltalk, other
+                  objection_trust, dropoff_risk, ready_to_convert, complaint,
+                  payment_issue, smalltalk, other
   confidence      0.0-1.0, your confidence in the intent label
   entities        object of extracted slots; use only keys you actually found from:
                   cart_value, tenure, city, product, merchant, income, existing_loan
   dropoff_risk    0.0-1.0, how likely this customer is to abandon
+  sentiment       one of: interested, happy, neutral, confused, hesitant, busy,
+                  frustrated, angry
+  buying_signals  array of VERBATIM phrases from the customer showing purchase
+                  intent. Empty array if none. Quote them, do not paraphrase.
   escalate        boolean, true if this turn involves credit terms, eligibility,
-                  or a complaint that needs careful handling
+                  a complaint, or anything needing careful handling
   rationale       one short sentence
 
 Intent guidance:
@@ -44,7 +56,24 @@ Intent guidance:
 - objection_trust    credit score worry, privacy worry, "is this a scam"
 - dropoff_risk       hesitation, "let me think", "send me details", stalling
 - ready_to_convert   agreeing to proceed, asking how to start now
+- complaint          a problem with a purchase, a merchant, a delivery, service,
+                     or a previous interaction. The caller wants something FIXED,
+                     not sold to. This includes purchases unrelated to PayFlex.
+- payment_issue      a debit failed, was charged twice, a late fee they dispute,
+                     a refund not received, a plan that looks wrong
 - smalltalk          greetings, consent responses, thanks
+
+Sentiment guidance:
+- angry / frustrated  raised complaint, repetition, "this is ridiculous",
+                      "nobody helped me", sarcasm
+- busy                "I'm driving", "call me later", clipped one-word replies
+- confused            re-asking something already answered, "I don't understand"
+- hesitant            "let me think", "I'm not sure", deflecting
+- interested          asking follow-up questions, engaging with detail
+
+Buying signals — quote verbatim when the customer says things like:
+"how fast is approval", "I can afford that", "I need this", "let's do it",
+"can I use it today", "what do I need to sign up".
 
 Drop-off signals that should push dropoff_risk above 0.6:
 "let me think about it", "send me the details", "I'll do it later",
@@ -125,11 +154,25 @@ def _coerce(data: dict) -> IntentOut:
             if v not in (None, "", [], {})
         }
 
+    try:
+        sentiment = Sentiment(str(data.get("sentiment", "neutral")).strip().lower())
+    except ValueError:
+        sentiment = Sentiment.NEUTRAL
+
+    signals_raw = data.get("buying_signals") or []
+    signals = (
+        [str(s).strip()[:140] for s in signals_raw if str(s).strip()][:5]
+        if isinstance(signals_raw, list)
+        else []
+    )
+
     return IntentOut(
         intent=intent,
         confidence=_f("confidence"),
         entities=entities,
         dropoff_risk=_f("dropoff_risk"),
+        sentiment=sentiment,
+        buying_signals=signals,
         escalate=bool(data.get("escalate", False)),
         rationale=str(data.get("rationale", ""))[:280],
     )
@@ -140,32 +183,64 @@ def _mock_intent(text: str) -> dict:
     identical every run."""
     t = text.lower()
 
-    def out(intent: str, conf: float, risk: float, esc: bool, why: str) -> dict:
+    def out(
+        intent: str,
+        conf: float,
+        risk: float,
+        esc: bool,
+        why: str,
+        sentiment: str = "neutral",
+        signals: list[str] | None = None,
+    ) -> dict:
         return {
             "intent": intent,
             "confidence": conf,
             "entities": {},
             "dropoff_risk": risk,
+            "sentiment": sentiment,
+            "buying_signals": signals or [],
             "escalate": esc,
             "rationale": why,
         }
 
+    if any(
+        k in t
+        for k in ("complaint", "issue which i", "problem with", "not working",
+                  "bought that", "nobody helped", "ridiculous")
+    ):
+        return out("complaint", 0.9, 0.4, True,
+                   "Caller has a problem to resolve, not a purchase to make.",
+                   "frustrated")
+    if any(
+        k in t
+        for k in ("charged twice", "debit failed", "bounce", "refund not",
+                  "double charge", "late fee")
+    ):
+        return out("payment_issue", 0.9, 0.35, True,
+                   "Servicing issue on an existing plan.", "frustrated")
     if any(k in t for k in ("think about it", "send me the details", "do it later")):
-        return out("dropoff_risk", 0.88, 0.82, True, "Explicit stalling language.")
+        return out("dropoff_risk", 0.88, 0.82, True, "Explicit stalling language.",
+                   "hesitant")
     if any(k in t for k in ("credit score", "cibil", "enquiry", "scam", "aadhaar", "privacy", "data leak")):
-        return out("objection_trust", 0.9, 0.55, True, "Trust or privacy concern.")
+        return out("objection_trust", 0.9, 0.55, True, "Trust or privacy concern.",
+                   "hesitant")
     if any(k in t for k in ("catch", "hidden", "processing fee", "free", "interest", "believe")):
-        return out("objection_cost", 0.9, 0.45, True, "Scepticism about cost.")
+        return out("objection_cost", 0.9, 0.45, True, "Scepticism about cost.",
+                   "confused")
     if any(k in t for k in ("limit", "eligible", "qualify", "approve", "ballpark")):
-        return out("eligibility", 0.92, 0.5, True, "Asking about limit or eligibility.")
+        return out("eligibility", 0.92, 0.5, True, "Asking about limit or eligibility.",
+                   "interested")
     if any(k in t for k in ("kyc", "salary slip", "documents", "sign up", "otp", "mandate")):
-        return out("kyc_steps", 0.88, 0.3, False, "Onboarding mechanics.")
+        return out("kyc_steps", 0.88, 0.3, False, "Onboarding mechanics.",
+                   "interested", ["what do I need to sign up"])
     if any(k in t for k in ("let's do it", "set it up", "start it", "i'll do the kyc", "do it now")):
-        return out("ready_to_convert", 0.93, 0.05, False, "Agreeing to proceed.")
+        return out("ready_to_convert", 0.93, 0.05, False, "Agreeing to proceed.",
+                   "interested", ["let's do it"])
     if any(k in t for k in ("not interested", "don't call", "do not call")):
-        return out("dropoff_risk", 0.95, 0.98, True, "Explicit opt-out.")
+        return out("dropoff_risk", 0.95, 0.98, True, "Explicit opt-out.", "neutral")
     if any(k in t for k in ("miss a payment", "late", "instalment", "emi", "total")):
-        return out("pricing", 0.85, 0.3, True, "Asking about charges or schedule.")
+        return out("pricing", 0.85, 0.3, True, "Asking about charges or schedule.",
+                   "confused")
     if len(t) < 25:
         return out("smalltalk", 0.7, 0.1, False, "Short acknowledgement.")
     return out("other", 0.4, 0.3, False, "No clear category.")

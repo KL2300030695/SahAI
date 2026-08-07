@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import type { PostCallResult } from "../lib/types";
 import GuardrailTrace from "./GuardrailTrace";
+import { ProbabilityChip, SentimentChip } from "./Bits";
 
 /**
  * Post-call review and the human approval gate.
@@ -71,6 +72,72 @@ export default function PostCallReview({
         </div>
 
         <div className="space-y-3 px-3 py-3">
+          {/* --- read at a glance --- */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5">
+              <div className="text-[10px] uppercase tracking-wide text-slate-600">
+                Interest
+              </div>
+              <div className="mt-0.5 text-xs font-semibold capitalize text-slate-200">
+                {crm.interest_level}
+              </div>
+            </div>
+            <div className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5">
+              <div className="text-[10px] uppercase tracking-wide text-slate-600">
+                Conversion
+              </div>
+              <div className="mt-0.5">
+                <ProbabilityChip value={crm.conversion_probability} />
+              </div>
+            </div>
+            <div className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5">
+              <div className="text-[10px] uppercase tracking-wide text-slate-600">
+                Sentiment
+              </div>
+              <div className="mt-0.5">
+                <SentimentChip sentiment={crm.sentiment} />
+              </div>
+            </div>
+          </div>
+          {crm.conversion_rationale && (
+            <p className="-mt-1 text-[11px] italic leading-snug text-slate-500">
+              {crm.conversion_rationale}
+            </p>
+          )}
+
+          {(crm.questions_asked.length > 0 || crm.objections.length > 0) && (
+            <div className="grid grid-cols-2 gap-2">
+              {crm.questions_asked.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] font-medium text-slate-400">
+                    Questions asked
+                  </div>
+                  <ul className="space-y-0.5">
+                    {crm.questions_asked.map((q, i) => (
+                      <li key={i} className="text-[11px] leading-snug text-slate-500">
+                        · {q}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {crm.objections.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] font-medium text-amber-400/80">
+                    Unresolved objections
+                  </div>
+                  <ul className="space-y-0.5">
+                    {crm.objections.map((o, i) => (
+                      <li key={i} className="text-[11px] leading-snug text-amber-200/70">
+                        · {o}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="mb-1 block text-[11px] font-medium text-slate-400">
               Call summary <span className="text-slate-600">(editable)</span>
@@ -110,8 +177,15 @@ export default function PostCallReview({
           </div>
 
           <div>
-            <div className="mb-1 text-[11px] font-medium text-slate-400">
-              Follow-up
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] font-medium text-slate-400">
+                Follow-up
+              </span>
+              {crm.followup_timing !== "none" && (
+                <span className="chip bg-sky-500/10 text-sky-300 ring-sky-500/30">
+                  {crm.followup_timing.replace(/_/g, " ")}
+                </span>
+              )}
             </div>
             {suppressed ? (
               <div

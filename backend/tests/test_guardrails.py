@@ -20,7 +20,17 @@ from app.llm.client import (
     normalise_currency,
 )
 from app.llm.router import RouteContext, route_nba, mentions_credit_terms
-from app.schemas import ActionType, Citation, Intent, ModelTier, Severity
+from app.schemas import (
+    ActionType,
+    Citation,
+    ConversionProbability,
+    FollowUpTiming,
+    Intent,
+    InterestLevel,
+    ModelTier,
+    Sentiment,
+    Severity,
+)
 
 
 def cite(chunk_id: str, text: str, effective_to: str | None = None) -> Citation:
@@ -267,6 +277,37 @@ class TestRouting:
         assert mentions_credit_terms("what's the interest rate")
         assert not mentions_credit_terms("what time do you close")
 
+    @pytest.mark.parametrize("intent", [Intent.COMPLAINT, Intent.PAYMENT_ISSUE])
+    def test_service_calls_escalate(self, intent):
+        """A caller with a problem is the easiest person to lose and the hardest
+        turn to get right -- the correct move is usually to stop selling and
+        route them, which is exactly what a cheap model gets wrong."""
+        tier, trigger = route_nba(
+            RouteContext(intent=intent, confidence=0.95, dropoff_risk=0.2,
+                         text="the AC I bought yesterday is faulty")
+        )
+        assert tier == ModelTier.HIGH
+        assert "sensitive_intent" in trigger
+
+    @pytest.mark.parametrize("mood", [Sentiment.ANGRY, Sentiment.FRUSTRATED])
+    def test_negative_sentiment_escalates(self, mood):
+        tier, trigger = route_nba(
+            RouteContext(intent=Intent.KYC_STEPS, confidence=0.95,
+                         dropoff_risk=0.1, text="I have called three times",
+                         sentiment=mood)
+        )
+        assert tier == ModelTier.HIGH
+        assert "negative_sentiment" in trigger
+
+    def test_calm_customer_on_a_routine_intent_stays_cheap(self):
+        """The sentiment rule must not quietly escalate every turn."""
+        tier, _ = route_nba(
+            RouteContext(intent=Intent.KYC_STEPS, confidence=0.95,
+                         dropoff_risk=0.1, text="what documents do I need",
+                         sentiment=Sentiment.INTERESTED)
+        )
+        assert tier == ModelTier.STANDARD
+
 
 # ---------------------------------------------------------------------------
 # CRM patch coercion
@@ -473,6 +514,76 @@ class TestSpeechNormalisation:
         and version strings must pass through."""
         assert normalise_currency("v1-234 build") == "v1-234 build"
         assert normalise_currency("2024-2026 period") == "2024-2026 period"
+
+
+class TestCRMNoteCoercion:
+    """The structured note fields must degrade safely — a model returning an
+    unknown label should not raise mid-call, and an opt-out must override
+    whatever the model concluded about prospects."""
+
+    def _coerce(self, data, **kw):
+        from app.agents.crm import _coerce
+
+        return _coerce(data, opted_out=kw.get("opted_out", False),
+                       do_not_call=kw.get("do_not_call", False))
+
+    def test_structured_fields_survive(self):
+        out = self._coerce({
+            "summary": "s", "disposition": "dropped",
+            "questions_asked": ["Is there a fee?", "How long is KYC?"],
+            "objections": ["Wants a limit first"],
+            "interest_level": "warm", "conversion_probability": "medium",
+            "conversion_rationale": "Started KYC then stalled on privacy.",
+            "followup_timing": "within_2_hours", "sentiment": "hesitant",
+            # A timing only survives alongside a draft — see the test below.
+            "followup_channel": "sms",
+            "followup_body": "Your progress is saved for 7 days: {link}",
+        })
+        assert out.interest_level is InterestLevel.WARM
+        assert out.conversion_probability is ConversionProbability.MEDIUM
+        assert out.followup_timing is FollowUpTiming.IMMEDIATE
+        assert out.sentiment is Sentiment.HESITANT
+        assert len(out.questions_asked) == 2 and len(out.objections) == 1
+
+    def test_unknown_labels_fall_back_rather_than_raise(self):
+        out = self._coerce({
+            "disposition": "dropped", "interest_level": "scorching",
+            "conversion_probability": "certain", "followup_timing": "next tuesday",
+            "sentiment": "vibing",
+        })
+        assert out.interest_level is InterestLevel.COLD
+        assert out.conversion_probability is ConversionProbability.LOW
+        assert out.followup_timing is FollowUpTiming.NONE
+        assert out.sentiment is Sentiment.NEUTRAL
+
+    def test_opt_out_overrides_optimistic_scoring(self):
+        """The model may still report a hot prospect on a call that ended in an
+        opt-out. Code wins."""
+        out = self._coerce({
+            "disposition": "dropped", "interest_level": "hot",
+            "conversion_probability": "high", "followup_timing": "tomorrow_morning",
+            "followup_channel": "sms", "followup_body": "come back!",
+        }, opted_out=True)
+        assert out.interest_level is InterestLevel.COLD
+        assert out.conversion_probability is ConversionProbability.LOW
+        assert out.followup_timing is FollowUpTiming.NONE
+        assert out.followup_draft is None
+
+    def test_no_draft_means_no_timing(self):
+        """A suppressed follow-up must not carry a timing implying one is coming."""
+        out = self._coerce({
+            "disposition": "converted", "followup_timing": "tomorrow_morning",
+            "followup_channel": "none",
+        })
+        assert out.followup_draft is None
+        assert out.followup_timing is FollowUpTiming.NONE
+
+    def test_pii_in_structured_fields_is_redacted(self):
+        out = self._coerce({
+            "disposition": "dropped",
+            "questions_asked": ["Can you text me on 98450 33127?"],
+        })
+        assert "98450" not in out.questions_asked[0]
 
 
 class TestPatchCoercion:

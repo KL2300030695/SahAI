@@ -20,7 +20,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.crm.db import get_crm_snapshot, init_db, session_scope
 from app.orchestrator import ConsentNotGiven, get_orchestrator
-from app.schemas import Intent, Speaker, TranscriptTurn
+from app.schemas import Intent, Sentiment, Speaker, TranscriptTurn
 from app.telemetry.cost import CostMeter, render_ledger_table
 
 TRANSCRIPTS = Path(__file__).resolve().parent / "app" / "seed" / "transcripts"
@@ -78,6 +78,8 @@ def main() -> int:
 
     history: list[TranscriptTurn] = []
     intents_seen: list[Intent] = []
+    sentiments_seen: list[Sentiment] = []
+    buying_signals: list[str] = []
     max_risk = 0.0
 
     for turn in turns:
@@ -99,6 +101,8 @@ def main() -> int:
             continue
         if assist.intent:
             intents_seen.append(assist.intent.intent)
+            sentiments_seen.append(assist.intent.sentiment)
+            buying_signals.extend(assist.intent.buying_signals)
             max_risk = max(max_risk, assist.intent.dropoff_risk)
 
         if args.quiet:
@@ -159,12 +163,24 @@ def main() -> int:
         consent_ack=bool(data.get("consent_ack")),
         crm=crm,
         do_not_call=dnc,
+        sentiments_seen=sentiments_seen,
+        buying_signals=buying_signals,
     )
     c = result.crm
     print(f"  {CYAN}disposition{RESET}  {c.disposition.value}")
+    print(f"  {CYAN}interest{RESET}     {c.interest_level.value} · "
+          f"conversion {c.conversion_probability.value} · sentiment {c.sentiment.value}")
+    if c.conversion_rationale:
+        print(f"  {DIM}             {c.conversion_rationale}{RESET}")
     print(f"  {CYAN}summary{RESET}      {c.summary}")
     if c.dropoff_reason:
         print(f"  {CYAN}reason{RESET}       {c.dropoff_reason}")
+    if c.questions_asked:
+        print(f"  {CYAN}questions{RESET}    " + "; ".join(c.questions_asked[:3]))
+    if c.objections:
+        print(f"  {CYAN}objections{RESET}   " + "; ".join(c.objections[:3]))
+    if c.followup_timing.value != "none":
+        print(f"  {CYAN}timing{RESET}       {c.followup_timing.value}")
     print(f"  {CYAN}crm_patch{RESET}    {c.crm_patch}")
     if c.followup_draft:
         print(f"  {CYAN}follow-up{RESET}    [{c.followup_draft.channel}] {c.followup_draft.body}")

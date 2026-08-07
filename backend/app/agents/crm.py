@@ -25,13 +25,17 @@ from typing import Optional
 from app.agents.base import Agent
 from app.guardrails.pii import redact_obj, redact_text
 from app.schemas import (
+    ConversionProbability,
     CRMIn,
     CRMOut,
     Disposition,
     FollowUpDraft,
+    FollowUpTiming,
     Intent,
+    InterestLevel,
     ModelTier,
     SendStatus,
+    Sentiment,
 )
 from app.telemetry.cost import CostMeter
 
@@ -50,11 +54,35 @@ Return ONLY a JSON object with exactly these keys:
                    — give the actual concern (e.g. "uncomfortable sharing
                    Aadhaar", "worried about credit score before a home loan
                    application", "merchant not covered").
+  questions_asked  array of the actual questions the customer asked, short and
+                   in their own framing. Empty array if none.
+  objections       array of the concerns they raised that were NOT resolved on
+                   the call. Do not list ones you answered to their satisfaction.
+  interest_level   one of: hot, warm, cold
+  conversion_probability  one of: high, medium, low
+  conversion_rationale    one sentence on WHY that probability — cite what they
+                   said, not a general impression.
+  sentiment        overall tone: interested, happy, neutral, confused, hesitant,
+                   busy, frustrated, angry
+  followup_timing  one of: none, within_2_hours, within_24_hours,
+                   tomorrow_morning, weekend, after_salary_date
   crm_patch        object of fields to update. Allowed keys ONLY:
                    kyc_status, kyc_last_step, city, last_disposition, do_not_call
   followup_channel one of: email, sms, none
   followup_subject short subject line, or "" for sms/none
   followup_body    the follow-up message, or "" if none
+
+Follow-up timing guidance (from the drop-off playbook):
+- stopped before starting KYC          -> within_2_hours
+- stopped at Aadhaar or mandate step   -> within_2_hours
+- completed KYC but did not purchase   -> within_24_hours
+- asked to be contacted later          -> tomorrow_morning
+- cited affordability or cash timing   -> after_salary_date
+- converted, complained, or opted out  -> none
+
+If the call was a COMPLAINT or a PAYMENT ISSUE, this was not a sales call:
+interest_level is cold, conversion_probability is low, and the next step is the
+resolution owner — not a follow-up pitch.
 
 Follow-up rules:
 - Address the SPECIFIC reason they stopped. A generic "complete your
@@ -172,6 +200,14 @@ class CRMFollowUpAgent(Agent[CRMIn, CRMOut]):
         opted_out = detect_opt_out(transcript_text)
 
         intents = ", ".join(sorted({i.value for i in inp.intents_seen})) or "none"
+        sentiments = (
+            ", ".join(sorted({s.value for s in inp.sentiments_seen})) or "none"
+        )
+        signals = (
+            "; ".join(f'"{s}"' for s in inp.buying_signals[:6])
+            if inp.buying_signals
+            else "none detected"
+        )
         crm_line = (
             f"{inp.crm.name}, {inp.crm.city}, kyc={inp.crm.kyc_status}"
             if inp.crm
@@ -181,6 +217,8 @@ class CRMFollowUpAgent(Agent[CRMIn, CRMOut]):
         user = f"""\
 CUSTOMER: {crm_line}
 INTENTS OBSERVED: {intents}
+SENTIMENTS OBSERVED: {sentiments}
+BUYING SIGNALS DETECTED: {signals}
 PEAK DROP-OFF RISK: {inp.max_dropoff_risk:.2f}
 CUSTOMER EXPLICITLY OPTED OUT: {"YES" if opted_out else "no"}
 
@@ -242,6 +280,34 @@ def _coerce(data: dict, *, opted_out: bool, do_not_call: bool) -> CRMOut:
                 body=redact_text(body)[:1200],
             )
 
+    def _enum(raw: object, enum_cls, default):
+        try:
+            return enum_cls(str(raw).strip().lower())
+        except (ValueError, AttributeError):
+            return default
+
+    def _str_list(raw: object, limit: int = 6) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        return [redact_text(str(x).strip())[:220] for x in raw if str(x).strip()][:limit]
+
+    interest = _enum(data.get("interest_level"), InterestLevel, InterestLevel.COLD)
+    probability = _enum(
+        data.get("conversion_probability"),
+        ConversionProbability,
+        ConversionProbability.LOW,
+    )
+    timing = _enum(data.get("followup_timing"), FollowUpTiming, FollowUpTiming.NONE)
+
+    # An opt-out overrides whatever the model concluded about prospects, and a
+    # suppressed follow-up must not carry a timing that implies one is coming.
+    if opted_out or do_not_call:
+        interest = InterestLevel.COLD
+        probability = ConversionProbability.LOW
+        timing = FollowUpTiming.NONE
+    elif draft is None:
+        timing = FollowUpTiming.NONE
+
     return CRMOut(
         summary=redact_text(str(data.get("summary", "")).strip())[:1500],
         crm_patch=redact_obj(patch),  # type: ignore[arg-type]
@@ -251,6 +317,15 @@ def _coerce(data: dict, *, opted_out: bool, do_not_call: bool) -> CRMOut:
             if data.get("dropoff_reason")
             else None
         ),
+        questions_asked=_str_list(data.get("questions_asked")),
+        objections=_str_list(data.get("objections")),
+        interest_level=interest,
+        conversion_probability=probability,
+        conversion_rationale=redact_text(
+            str(data.get("conversion_rationale", "")).strip()
+        )[:300],
+        followup_timing=timing,
+        sentiment=_enum(data.get("sentiment"), Sentiment, Sentiment.NEUTRAL),
         followup_draft=draft,
         # The only value this agent can ever produce.
         send_status=SendStatus.PENDING_AGENT_APPROVAL,
@@ -266,7 +341,35 @@ def _mock_crm(opted_out: bool, inp: CRMIn) -> dict:
             "Opt-out recorded; no follow-up to be sent.",
             "disposition": "not_interested",
             "dropoff_reason": "Does not want an additional credit product on record.",
+            "questions_asked": ["What does the AI on this call actually do?"],
+            "objections": ["Does not want another credit product on their name."],
+            "interest_level": "cold",
+            "conversion_probability": "low",
+            "conversion_rationale": "Explicit opt-out and a do-not-call request.",
+            "sentiment": "neutral",
+            "followup_timing": "none",
             "crm_patch": {"do_not_call": True, "last_disposition": "not_interested"},
+            "followup_channel": "none",
+            "followup_subject": "",
+            "followup_body": "",
+        }
+
+    if Intent.COMPLAINT in inp.intents_seen or Intent.PAYMENT_ISSUE in inp.intents_seen:
+        return {
+            "summary": "Customer called about a problem with a recent purchase "
+            "rather than about Pay-in-3. No sales conversation took place. Routed "
+            "to the resolution owner; the open item is the customer's issue, not "
+            "an application.",
+            "disposition": "callback",
+            "dropoff_reason": "Called about a service issue, not a purchase.",
+            "questions_asked": ["Can you help with the item I bought?"],
+            "objections": [],
+            "interest_level": "cold",
+            "conversion_probability": "low",
+            "conversion_rationale": "This was a service call; no buying intent expressed.",
+            "sentiment": "frustrated",
+            "followup_timing": "none",
+            "crm_patch": {"last_disposition": "callback"},
             "followup_channel": "none",
             "followup_subject": "",
             "followup_body": "",
@@ -282,6 +385,20 @@ def _mock_crm(opted_out: bool, inp: CRMIn) -> dict:
             "disposition": "dropped",
             "dropoff_reason": "Uncomfortable sharing Aadhaar; also frustrated that "
             "the limit is only visible after completing KYC.",
+            "questions_asked": [
+                "Do you store my Aadhaar, and who else gets it?",
+                "Roughly what limit would someone like me get?",
+            ],
+            "objections": [
+                "Unwilling to share Aadhaar with an app.",
+                "Wants a limit figure before committing to KYC.",
+            ],
+            "interest_level": "warm",
+            "conversion_probability": "medium",
+            "conversion_rationale": "Engaged with the detail and started KYC, but "
+            "stalled on a privacy concern rather than on the product itself.",
+            "sentiment": "hesitant",
+            "followup_timing": "within_2_hours",
             "crm_patch": {"kyc_status": "in_progress", "kyc_last_step": 3,
                           "last_disposition": "dropped"},
             "followup_channel": "sms",
@@ -299,6 +416,19 @@ def _mock_crm(opted_out: bool, inp: CRMIn) -> dict:
         "the call and their limit is now active.",
         "disposition": "converted",
         "dropoff_reason": None,
+        "questions_asked": [
+            "What's the catch — where are you making money?",
+            "Is there a 199 processing fee?",
+            "What happens if I miss a payment?",
+            "What do I need to sign up?",
+        ],
+        "objections": [],
+        "interest_level": "hot",
+        "conversion_probability": "high",
+        "conversion_rationale": "Completed KYC on the call after their fee "
+        "objection was answered with the current schedule.",
+        "sentiment": "interested",
+        "followup_timing": "none",
         "crm_patch": {"kyc_status": "completed", "kyc_last_step": 5,
                       "last_disposition": "converted"},
         "followup_channel": "none",

@@ -40,7 +40,7 @@ SahAI listens alongside the agent and, on every customer turn:
 - **classifies intent** and scores drop-off risk
 - **retrieves the current terms** from the knowledge base, with citations
 - **suggests what to say next**, in the agent's voice, ready to speak
-- **checks its own output** against seven guardrails before the agent sees it
+- **checks its own output** against eight guardrails before the agent sees it
 
 After the call it writes the summary, proposes a CRM update, and drafts a
 targeted follow-up — all of which sit at `pending_agent_approval` until a named
@@ -53,7 +53,7 @@ touching credit terms is flagged for the human to confirm and say themselves —
 enforced in code, and the flag can be raised by the system but never lowered by
 the model.
 
-**Five of the seven guardrails are deterministic Python, not prompt
+**Six of the eight guardrails are deterministic Python, not prompt
 instructions.** The dashboard labels each `code` or `llm` so a compliance
 reviewer can see exactly which survive an adversarial customer:
 
@@ -65,7 +65,13 @@ reviewer can see exactly which survive an adversarial customer:
 | Credit terms require human confirmation | code — flag can only be raised |
 | PII masked in every log, frame, and CRM write | code — regex |
 | Opt-out suppresses all follow-up | code — TRAI compliance |
+| No claiming an action that never happened | code — the assistant has no side effects |
 | Output aligns with written business goals | llm — policy-tuned model |
+
+It also knows when **not** to sell. A `complaint` or `payment_issue` intent — or
+an angry customer — routes to a human instead of a pitch. A caller with a
+problem is not a sales opportunity, and treating them as one is how you turn an
+unhappy customer into a lost one.
 
 ---
 
@@ -90,7 +96,7 @@ Three levers, not one:
    for credit terms and objections. Escalation is a code rule with a named
    trigger logged against every decision.
 2. **RAG instead of inference.** Retrieval is the highest-frequency step in the
-   pipeline and costs **$0.00** — local embeddings plus BM25. Five of seven
+   pipeline and costs **$0.00** — local embeddings plus BM25. Six of eight
    guardrails likewise. In a typical call, **17 pipeline steps run at zero
    marginal cost.**
 3. **Reasoning-effort control.** The reasoning models bill chain-of-thought as

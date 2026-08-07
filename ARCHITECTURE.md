@@ -2,7 +2,7 @@
 
 An AI voice co-pilot for inside-sales agents selling a pay-in-3, zero-cost EMI
 product. Six specialised agents, cost-tiered across five open-weights models,
-with seven guardrails — five of which are deterministic code rather than prompt
+with eight guardrails — six of which are deterministic code rather than prompt
 instructions.
 
 Measured end-to-end: **$0.0032 per assisted call, a 57× cost reduction** against
@@ -65,7 +65,7 @@ flowchart TB
     end
 
     subgraph data["State"]
-        KB[("Chroma + BM25<br/>77 chunks / 18 docs")]
+        KB[("Chroma + BM25<br/>83 chunks / 19 docs")]
         DB[("SQLite mock CRM<br/>customers · calls · cost ledger")]
     end
 
@@ -80,7 +80,7 @@ flowchart TB
     A3 -->|routine| T3
     A3 -->|escalated| T4
     A3 --> A5
-    A5 -->|5 code checks| T0
+    A5 -->|6 code checks| T0
     A5 -->|goal alignment| T5
     A5 --> UI
 
@@ -114,12 +114,16 @@ or re-tiered in isolation.
 
 ```
 ScreenIn      → ScreenOut     { is_attack, score }
-IntentIn      → IntentOut     { intent, confidence, entities, dropoff_risk, escalate }
+IntentIn      → IntentOut     { intent, confidence, entities, dropoff_risk,
+                                sentiment, buying_signals[], escalate }
 RetrievalIn   → RetrievalOut  { citations[], facts[], dropped_stale[] }
 NBAIn         → NBAOut        { say, why, action_type, cited_chunk_ids,
                                 requires_human_confirmation }
 CRMIn         → CRMOut        { summary, crm_patch, disposition, dropoff_reason,
-                                followup_draft, send_status }
+                                questions_asked[], objections[], interest_level,
+                                conversion_probability, conversion_rationale,
+                                followup_timing, sentiment, followup_draft,
+                                send_status }
 CheckIn       → CheckOut      { passed, checks[], redacted_say, blocked_reason }
 ```
 
@@ -136,11 +140,17 @@ escalation carries a named trigger that lands in the ledger and the UI.
 
 | Rule | Fires when |
 |---|---|
-| `sensitive_intent` | intent ∈ {eligibility, objection_cost, objection_trust} |
+| `sensitive_intent` | intent ∈ {eligibility, objection_cost, objection_trust, **complaint**, **payment_issue**} |
 | `credit_terms_in_context` | customer's words match regulated credit terminology |
 | `high_dropoff_risk` | drop-off risk > 0.60 |
 | `low_intent_confidence` | intent confidence < 0.60 |
+| `negative_sentiment` | customer sounds angry or frustrated |
 | `agent_requested` | human asked for a second opinion |
+
+A caller with a problem is the easiest person to lose and the hardest turn to
+get right — the correct move is usually to *stop selling* and route them, which
+is exactly what a cheap model gets wrong. Same reasoning for negative sentiment:
+a cheap model reaches for a script at the moment a script is most damaging.
 
 **`llama-3.3-70b-versatile` is deliberately excluded.** At $0.59/$0.79 it is 4×
 the input cost of `gpt-oss-120b` ($0.15/$0.60), which is also the stronger
@@ -150,7 +160,7 @@ reasoner. Dominated on both axes.
 
 1. **Tiering** — cheap by default; expense is opt-in and must be justified by a rule.
 2. **RAG instead of inference** — retrieval is the highest-frequency step in the
-   pipeline and costs **$0.00**. Five of seven guardrails likewise.
+   pipeline and costs **$0.00**. Six of eight guardrails likewise.
 3. **`reasoning_effort`** — the gpt-oss models bill chain-of-thought as output
    tokens. Measured on an identical NBA prompt: `low` = 150 completion tokens,
    `medium` = 334. 2.2× the cost for the same answer on a well-specified task.
@@ -175,7 +185,7 @@ the object. Fixed with headroom, `reasoning_effort=low`, and a retry ladder in
 
 ## 5. Guardrails
 
-Seven checks. **Five are deterministic Python.** Each result carries
+Eight checks. **Six are deterministic Python.** Each result carries
 `enforced_by`, which the dashboard renders distinctly — a reviewer can see which
 parts of the safety story survive an adversarial customer.
 
@@ -218,7 +228,7 @@ Embeddings alone are weak on exact tokens like "₹250", "PAN", or "199" —
 precisely the terms a fintech agent must quote correctly. BM25 catches those;
 vectors catch paraphrase ("what's the catch" → hidden charges).
 
-77 chunks from 18 documents. Chunking is heading-aware and carries
+83 chunks from 19 documents. Chunking is heading-aware and carries
 `effective_from` / `effective_to` per chunk so staleness is knowable at
 retrieval time, not answer time.
 

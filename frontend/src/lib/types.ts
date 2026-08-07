@@ -10,11 +10,23 @@ export interface TranscriptTurn {
   ts: number;
 }
 
+export type Sentiment =
+  | "interested"
+  | "happy"
+  | "neutral"
+  | "confused"
+  | "hesitant"
+  | "busy"
+  | "frustrated"
+  | "angry";
+
 export interface IntentOut {
   intent: string;
   confidence: number;
   entities: Record<string, string>;
   dropoff_risk: number;
+  sentiment: Sentiment;
+  buying_signals: string[];
   escalate: boolean;
   rationale: string;
 }
@@ -107,6 +119,13 @@ export interface CRMOut {
   crm_patch: Record<string, unknown>;
   disposition: string;
   dropoff_reason: string | null;
+  questions_asked: string[];
+  objections: string[];
+  interest_level: "hot" | "warm" | "cold";
+  conversion_probability: "high" | "medium" | "low";
+  conversion_rationale: string;
+  followup_timing: string;
+  sentiment: Sentiment;
   followup_draft: FollowUpDraft | null;
   send_status: string;
 }

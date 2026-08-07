@@ -1,5 +1,5 @@
 import type { TurnAssist } from "../lib/types";
-import { Meter, TierPath } from "./Bits";
+import { Meter, SentimentChip, TierPath } from "./Bits";
 import GuardrailTrace from "./GuardrailTrace";
 
 /** Everything the human agent sees for the current customer turn. */
@@ -15,6 +15,7 @@ export default function AssistPanel({ a }: { a: TurnAssist }) {
               <span className="rounded bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-500/30">
                 {a.intent.intent}
               </span>
+              <SentimentChip sentiment={a.intent.sentiment} />
               {Object.entries(a.intent.entities).map(([k, v]) => (
                 <span
                   key={k}
@@ -26,6 +27,33 @@ export default function AssistPanel({ a }: { a: TurnAssist }) {
             </div>
             <Meter label="confidence" value={a.intent.confidence} danger={2} />
             <Meter label="drop-off" value={a.intent.dropoff_risk} />
+
+            {a.intent.buying_signals.length > 0 && (
+              <div className="rounded border border-emerald-800/50 bg-emerald-950/25 px-2 py-1.5">
+                <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
+                  Buying signal — move to close
+                </div>
+                {a.intent.buying_signals.map((s, i) => (
+                  <p key={i} className="text-[11px] italic text-emerald-200/80">
+                    “{s}”
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {(a.intent.sentiment === "angry" ||
+              a.intent.sentiment === "frustrated" ||
+              a.intent.intent === "complaint" ||
+              a.intent.intent === "payment_issue") && (
+              <div className="rounded border border-orange-800/50 bg-orange-950/25 px-2 py-1.5">
+                <p className="text-[11px] leading-snug text-orange-200/90">
+                  <strong>Stop selling.</strong> This caller has a problem to
+                  resolve — acknowledge and route them. Don't mention the
+                  product, offers, or onboarding.
+                </p>
+              </div>
+            )}
+
             {a.intent.rationale && (
               <p className="text-[11px] italic leading-snug text-slate-500">
                 {a.intent.rationale}

@@ -5,7 +5,7 @@ product: understands customer intent mid-call, surfaces grounded product terms,
 suggests the next best action, and closes the loop with a CRM update and a
 follow-up draft — behind a human approval gate.
 
-Six specialised agents, five open-weights models, seven guardrails.
+Six specialised agents, five open-weights models, eight guardrails.
 
 > **Measured: $0.0032 per assisted call (₹0.27) — a 57× cost reduction** against
 > the same token volume through a single frontier-model mega-prompt. That figure
@@ -50,8 +50,9 @@ python run_call.py call-004    # prompt-injection attempt + opt-out
 python run_call.py call-002 --quiet   # ledger only
 ```
 
-This prints the full pipeline per turn — intent, citations, suggestion, all
-seven guardrail checks, the tier path, and a per-decision cost ledger.
+This prints the full pipeline per turn — intent, sentiment, citations,
+suggestion, all eight guardrail checks, the tier path, and a per-decision cost
+ledger.
 
 ### No API key?
 
@@ -74,7 +75,7 @@ survives a rate limit or dead conference wifi.
 
 ## What the guardrails actually do
 
-Seven checks. **Five are deterministic Python**, not prompt instructions — the
+Eight checks. **Six are deterministic Python**, not prompt instructions — the
 dashboard labels each `code` or `llm` so you can see which survive an
 adversarial customer.
 
@@ -92,6 +93,12 @@ adversarial customer.
   is drafted at all. TRAI compliance in code, not model discretion.
 - **PII** — Aadhaar, PAN, card, phone, OTP, and email are masked in every log,
   WebSocket frame, and CRM write.
+- **No fabricated actions** — a suggestion claiming something already happened
+  ("I've sent you an email", "I've marked you as do-not-call") is blocked. The
+  assistant has no side effects, and a customer hanging up believing otherwise
+  is worse than a wrong fee.
+- **Stop selling on a complaint** — `complaint` and `payment_issue` intents, and
+  angry or frustrated sentiment, route to a human instead of a pitch.
 
 Verified end-to-end:
 
@@ -109,7 +116,7 @@ Verified end-to-end:
 
 | Tier | Model | $/Mtok in→out | Used for |
 |---|---|---|---|
-| `NONE` | local MiniLM + BM25 + regex | **$0.00** | Retrieval, PII, 5 of 7 guardrails |
+| `NONE` | local MiniLM + BM25 + regex | **$0.00** | Retrieval, PII, 6 of 8 guardrails |
 | `TINY` | `llama-prompt-guard-2-86m` | 0.035 | Injection screen, every turn |
 | `CHEAP` | `llama-3.1-8b-instant` | 0.05 → 0.08 | Intent, entities, drop-off |
 | `STANDARD` | `openai/gpt-oss-20b` | 0.075 → 0.30 | Routine suggestions, summary |

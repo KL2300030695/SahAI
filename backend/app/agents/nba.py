@@ -29,9 +29,11 @@ from app.llm.router import RouteContext, route_nba
 from app.schemas import (
     ActionType,
     Citation,
+    Intent,
     ModelTier,
     NBAIn,
     NBAOut,
+    Sentiment,
     Speaker,
 )
 from app.telemetry.cost import CostMeter
@@ -66,6 +68,16 @@ HARD RULES:
    action as something the AGENT will do next: "I'll send that across once
    we're done." Telling the customer something was done when it was not is
    the single worst failure available to you.
+8. A CALLER WITH A PROBLEM IS NOT A SALES OPPORTUNITY. If the intent is
+   `complaint` or `payment_issue`, or the customer sounds frustrated or angry:
+   stop selling entirely. Do not mention the product, offers, limits, or
+   onboarding. Acknowledge the problem, then route them to the right team
+   (`action_type: escalate_human`). Never promise a refund, reversal, waiver,
+   or resolution date. If the purchase was never on a PayFlex plan, say so
+   plainly rather than implying visibility you do not have.
+9. Match the customer's state. If they are busy, be brief and offer a callback.
+   If they are confused, slow down and re-explain one thing, not five. If they
+   are angry, do not be cheerful at them.
 
 Return ONLY a JSON object with exactly these keys:
   say                          what the agent should say next (string)
@@ -88,6 +100,27 @@ def _format_citations(citations: list[Citation]) -> str:
             f"[chunk_id: {c.chunk_id}] (from: {c.title}, version {c.version})\n{c.text}"
         )
     return "\n\n---\n\n".join(blocks)
+
+
+def _selling_gate(inp: NBAIn) -> str:
+    """A blunt in-prompt instruction when this turn must not be a pitch.
+
+    Stated as its own line rather than buried in the system rules, because it
+    inverts the agent's default job and needs to be impossible to miss."""
+    if inp.intent in (Intent.COMPLAINT, Intent.PAYMENT_ISSUE):
+        return (
+            "\n*** DO NOT SELL ON THIS TURN. The customer has a problem to "
+            "resolve. Acknowledge it and route them to the right team. Do not "
+            "mention the product, offers, limits, or onboarding. ***"
+        )
+    if inp.sentiment in (Sentiment.ANGRY, Sentiment.FRUSTRATED):
+        return (
+            "\n*** The customer is upset. Do not pitch. Acknowledge first, and "
+            "offer a supervisor if they have raised this before. ***"
+        )
+    if inp.sentiment is Sentiment.BUSY:
+        return "\n*** The customer is short of time. One sentence, then offer a callback. ***"
+    return ""
 
 
 def _format_crm(inp: NBAIn) -> str:
@@ -126,8 +159,10 @@ class NextBestActionAgent(Agent[NBAIn, NBAOut]):
 
         user = f"""\
 DETECTED INTENT: {inp.intent.value}
+CUSTOMER SOUNDS: {inp.sentiment.value}
 DROP-OFF RISK: {inp.dropoff_risk:.2f}
 EXTRACTED DETAILS: {inp.entities or '(none)'}
+{_selling_gate(inp)}
 
 CRM RECORD:
 {_format_crm(inp)}
@@ -178,6 +213,7 @@ Write the agent's next line. Respond with JSON only."""
                 confidence=confidence,
                 dropoff_risk=inp.dropoff_risk,
                 text=customer_text,
+                sentiment=inp.sentiment,
             )
         )
 
@@ -263,6 +299,18 @@ def _mock_nba(inp: NBAIn) -> dict:
             "the Aadhaar step — that's the one place people pause, so I'll walk "
             "you through it.",
             "explain",
+        ),
+        "complaint": (
+            "I'm sorry, that shouldn't have happened. Let me get you to the team "
+            "who can actually fix it rather than have you explain it twice — can "
+            "you give me one moment?",
+            "escalate_human",
+        ),
+        "payment_issue": (
+            "That's not right and I want it looked at properly. I'm putting you "
+            "through to the payments team now — they can see the transaction and "
+            "I can't, so I'd rather not guess at it.",
+            "escalate_human",
         ),
     }
     say, action = canned.get(

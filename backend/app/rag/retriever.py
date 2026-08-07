@@ -167,6 +167,10 @@ _INTENT_HINTS: dict[Intent, str] = {
     Intent.OBJECTION_TRUST: "credit score bureau enquiry privacy Aadhaar data safety scam",
     Intent.DROPOFF_RISK: "drop-off resume saved progress follow-up",
     Intent.READY_TO_CONVERT: "KYC steps mandate schedule dates",
+    Intent.COMPLAINT: "complaint escalation supervisor route stop selling merchant "
+    "dispute unresolved",
+    Intent.PAYMENT_ISSUE: "debit failed bounce charged twice refund late fee "
+    "dispute collections",
     Intent.SMALLTALK: "",
     Intent.OTHER: "",
 }
