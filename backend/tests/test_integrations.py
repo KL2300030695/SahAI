@@ -70,27 +70,54 @@ def _seed():
 
 
 # --- unconfigured is a supported state -------------------------------------
+#
+# These force the unconfigured state rather than reading whatever .env happens
+# to hold. They passed on a laptop with no credentials and started failing the
+# moment a real service-account key was added -- which means they had been
+# testing the environment, not the code. Worse, one of them would then have
+# written a document to the live project on every test run.
 
 
-def test_both_mirrors_are_off_without_credentials():
-    assert firestore_sync.enabled() is False
-    assert sheets.enabled() is False
+@pytest.fixture
+def unconfigured(monkeypatch):
+    monkeypatch.setattr(firestore_sync, "enabled", lambda: False)
+    monkeypatch.setattr(sheets, "enabled", lambda: False)
+    # A hard stop: if a guard is ever missed, the test fails loudly instead of
+    # silently reaching Google.
+    monkeypatch.setattr(
+        firestore_sync,
+        "_get_client",
+        lambda: pytest.fail("touched Firestore while unconfigured"),
+    )
+    monkeypatch.setattr(
+        sheets, "_get_client", lambda: pytest.fail("touched Sheets while unconfigured")
+    )
 
 
-def test_syncing_while_unconfigured_is_a_no_op_not_an_error():
+def test_syncing_while_unconfigured_is_a_no_op_not_an_error(unconfigured):
     assert firestore_sync.sync_call({"call_id": "x"}, []) is False
+    assert firestore_sync.sync_customer({"customer_id": "x"}) is False
     assert sheets.push_call({"call_id": "x"}, []) is None
     assert firestore_sync.status()["failures"] == 0
 
 
-def test_status_endpoint_reports_unconfigured_honestly():
+def test_status_never_claims_ready_without_the_prerequisites():
+    """`ready` is a one-way promise, not an equality.
+
+    It may legitimately be False while the flags look fine -- the conftest
+    disables mirrors for the whole suite, which is exactly that case. What must
+    never happen is the reverse: reporting ready with no credentials, which
+    would send someone hunting for missing documents that were never sent.
+    """
     body = TestClient(app).get("/api/integrations/status").json()
-    assert body["firestore"]["ready"] is False
-    assert body["sheets"]["ready"] is False
-    assert body["firestore"]["credentials_found"] is False
+    for name in ("firestore", "sheets"):
+        st = body[name]
+        if st["ready"]:
+            assert st["enabled"] and st["credentials_found"]
+            assert st.get("sheet_id_set", True)
 
 
-def test_finalise_and_approve_work_untouched_with_no_google_setup():
+def test_finalise_and_approve_work_untouched_with_no_google_setup(unconfigured):
     """The path a judge takes: clone, run, never configure any of this."""
     _seed()
     r = TestClient(app).post(

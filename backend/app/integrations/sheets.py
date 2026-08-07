@@ -59,7 +59,7 @@ def _get_client() -> Any:
 
         s = get_settings()
         creds = service_account.Credentials.from_service_account_file(
-            s.google_credentials_path, scopes=SCOPES
+            str(s.google_credentials_file), scopes=SCOPES
         )
         _client = gspread.authorize(creds)
         return _client

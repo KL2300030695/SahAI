@@ -57,7 +57,7 @@ def _get_client() -> Any:
         from google.oauth2 import service_account
 
         creds = service_account.Credentials.from_service_account_file(
-            s.google_credentials_path
+            str(s.google_credentials_file)
         )
         _client = firestore.Client(
             project=s.firestore_project or creds.project_id, credentials=creds

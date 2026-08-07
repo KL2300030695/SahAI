@@ -70,12 +70,30 @@ class Settings(BaseSettings):
     sheets_id: str = ""
 
     @property
-    def google_ready(self) -> bool:
-        from pathlib import Path as _Path
+    def google_credentials_file(self) -> Optional[Path]:
+        """Absolute path to the service-account JSON, or None.
 
-        return bool(self.google_credentials_path) and _Path(
-            self.google_credentials_path
-        ).exists()
+        Resolved against the repo root rather than the process CWD. uvicorn is
+        started from `backend/`, so a natural-looking `./secrets/key.json` in a
+        root-level .env otherwise resolves to `backend/secrets/key.json` and the
+        integration silently reports "no credentials" while the file sits right
+        there. The sqlite URL already needed the same treatment.
+        """
+        raw = (self.google_credentials_path or "").strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        if p.is_absolute():
+            return p if p.exists() else None
+        for base in (REPO_ROOT, BACKEND_DIR):
+            candidate = (base / p).resolve()
+            if candidate.exists():
+                return candidate
+        return None
+
+    @property
+    def google_ready(self) -> bool:
+        return self.google_credentials_file is not None
 
     @property
     def stream_wss_url(self) -> str:
