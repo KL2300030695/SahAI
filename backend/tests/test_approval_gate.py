@@ -87,7 +87,7 @@ def test_a_blocked_message_cannot_be_sent_unchanged(client):
     _seed(BLOCKED_TRACE)
     r = client.post(
         f"/api/calls/{CALL_ID}/approve",
-        json={"approver_id": "subhash", "edited_followup_body": BAD_DRAFT},
+        json={"edited_followup_body": BAD_DRAFT},
     )
     assert r.status_code == 400
     assert "goal_alignment" in r.json()["detail"]
@@ -98,7 +98,7 @@ def test_clicking_approve_without_touching_the_draft_is_also_refused(client):
     """No edit field at all is the same as an unchanged one."""
     _seed(BLOCKED_TRACE)
     r = client.post(
-        f"/api/calls/{CALL_ID}/approve", json={"approver_id": "subhash"}
+        f"/api/calls/{CALL_ID}/approve", json={}
     )
     assert r.status_code == 400
     assert _status() == "pending_agent_approval"
@@ -110,7 +110,6 @@ def test_a_rewrite_clears_the_block_and_is_attributed(client):
     r = client.post(
         f"/api/calls/{CALL_ID}/approve",
         json={
-            "approver_id": "subhash",
             "edited_followup_body": (
                 "Pay-in-3 splits your purchase into three instalments at no "
                 "extra cost when you pay on schedule. I'll send the fee "
@@ -122,10 +121,15 @@ def test_a_rewrite_clears_the_block_and_is_attributed(client):
     assert r.json()["send_status"] == "sent"
     assert "goal_alignment" in r.json()["overrode"]
 
-    # The override is recorded in the audit trace, not swallowed.
+    # The override is recorded in the audit trace under the *credential's*
+    # identity, not a name the caller supplied.
+    from app.security import LOCAL
+
     with session_scope() as s:
-        trace = json.loads(s.get(Call, CALL_ID).guardrail_trace_json)
-    assert any("subhash" in (c.get("detail") or "") for c in trace)
+        call = s.get(Call, CALL_ID)
+        trace = json.loads(call.guardrail_trace_json)
+        assert call.approved_by == LOCAL.audit_name
+    assert any(LOCAL.audit_name in (c.get("detail") or "") for c in trace)
 
 
 def test_a_rewrite_still_cannot_claim_a_completed_action(client):
@@ -138,7 +142,6 @@ def test_a_rewrite_still_cannot_claim_a_completed_action(client):
     r = client.post(
         f"/api/calls/{CALL_ID}/approve",
         json={
-            "approver_id": "subhash",
             "edited_followup_body": "I've already sent the fee schedule to your inbox.",
         },
     )
@@ -152,7 +155,7 @@ def test_a_clean_call_still_sends_normally(client):
     _seed([{"name": "grounding", "passed": True, "enforced_by": "code"}])
     r = client.post(
         f"/api/calls/{CALL_ID}/approve",
-        json={"approver_id": "subhash"},
+        json={},
     )
     assert r.status_code == 200, r.text
     assert r.json()["send_status"] == "sent"
@@ -163,7 +166,55 @@ def test_rejecting_writes_nothing(client):
     _seed(BLOCKED_TRACE)
     r = client.post(
         f"/api/calls/{CALL_ID}/approve",
-        json={"approver_id": "subhash", "decision": "reject"},
+        json={"decision": "reject"},
     )
     assert r.status_code == 200
     assert r.json()["send_status"] == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# The identity on a customer-record write
+#
+# This is the claim the whole design rests on: only a named human can write to
+# a customer record. It was unenforced. The name arrived as a string in the
+# request body, so anyone reaching the port could approve as anyone -- including
+# a script typing a colleague's name. Identity now comes from the credential.
+# ---------------------------------------------------------------------------
+
+
+def test_the_caller_cannot_choose_the_name_on_the_record(client):
+    """A supplied name is ignored, not honoured."""
+    _seed([])
+    r = client.post(
+        f"/api/calls/{CALL_ID}/approve",
+        json={"approver_id": "Somebody Else", "decision": "approve"},
+    )
+    assert r.status_code == 200, r.text
+    with session_scope() as s:
+        assert "Somebody Else" not in (s.get(Call, CALL_ID).approved_by or "")
+
+
+def test_an_unauthenticated_write_is_marked_as_such(client):
+    """Open mode must not be indistinguishable from a signed approval.
+
+    Writing a bare name while the service runs without auth would make the two
+    identical in the CRM history a year later, when nobody remembers which
+    deployment had auth switched on.
+    """
+    _seed([])
+    client.post(f"/api/calls/{CALL_ID}/approve", json={})
+    with session_scope() as s:
+        assert "unauthenticated" in s.get(Call, CALL_ID).approved_by
+
+
+def test_roles_gate_what_a_principal_may_do():
+    from app.security import Principal
+
+    viewer = Principal("k", "Anita", "viewer")
+    agent = Principal("k", "Priya", "agent")
+    admin = Principal("k", "Ravi", "admin")
+
+    assert not viewer.can("approve") and not viewer.can("call")
+    assert agent.can("approve") and agent.can("call")
+    assert not agent.can("integrate")
+    assert admin.can("integrate")

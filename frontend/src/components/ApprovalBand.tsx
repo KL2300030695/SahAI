@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { PostCallResult } from "../lib/types";
 
@@ -12,8 +12,9 @@ import type { PostCallResult } from "../lib/types";
  * layout rather than as a badge on a card.
  *
  * The CRM change renders as an actual before → after so the agent can see what
- * they are authorising, and their name is required, because an approval nobody
- * is named on is not an approval.
+ * they are authorising, signed under the identity their credential carries —
+ * because an approval nobody is named on is not an approval, and a name the
+ * approver types is not an identity.
  */
 export default function ApprovalBand({
   result,
@@ -27,7 +28,19 @@ export default function ApprovalBand({
   const { crm } = result;
   const [summary, setSummary] = useState(crm.summary);
   const [body, setBody] = useState(crm.followup_draft?.body ?? "");
-  const [approver, setApprover] = useState("");
+  /**
+   * Who this will be signed as.
+   *
+   * The band used to ask the agent to type a name, which the server then wrote
+   * to the customer record verbatim — so the identity on an audit row was
+   * whatever was typed. The server now takes it from the credential and ignores
+   * anything sent. Showing the real identity instead of asking for one is the
+   * honest version: the deliberate act is the click, not the typing.
+   */
+  const [me, setMe] = useState<{ name: string; authenticated: boolean } | null>(null);
+  useEffect(() => {
+    api.me().then(setMe).catch(() => setMe(null));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,15 +64,10 @@ export default function ApprovalBand({
   const blocked = failed.length > 0 && hasDraft && !rewritten;
 
   async function send(decision: "approve" | "reject") {
-    if (!approver.trim()) {
-      setError("Your name — an approval nobody is named on isn't an approval.");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
       const r = await api.approve(result.call_id, {
-        approver_id: approver.trim(),
         decision,
         edited_summary: summary,
         edited_followup_body: crm.followup_draft ? body : undefined,
@@ -159,16 +167,26 @@ export default function ApprovalBand({
 
         <div className="mt-5 flex flex-wrap items-end gap-3">
           <div>
-            <label className="t-label mb-1.5 block" htmlFor="approver">
-              Your name
-            </label>
-            <input
-              id="approver"
-              value={approver}
-              onChange={(e) => setApprover(e.target.value)}
-              placeholder="e.g. priya.n"
-              className="card w-52 px-3 py-2 text-[13px]"
-            />
+            <span className="t-label mb-1.5 block">Signing as</span>
+            <p
+              className="card px-3 py-2 text-[13px]"
+              style={{
+                color: me?.authenticated ? "var(--ink)" : "var(--yourcall)",
+                borderColor: me?.authenticated
+                  ? "var(--hairline)"
+                  : "var(--yourcall)",
+              }}
+              title={
+                me?.authenticated
+                  ? "Taken from your credential — it cannot be typed"
+                  : "This service is running without authentication, so the record will say so"
+              }
+            >
+              {me ? me.name : "…"}
+              {me && !me.authenticated && (
+                <span className="block text-[11px]">recorded as unauthenticated</span>
+              )}
+            </p>
           </div>
           <button
             onClick={() => send("approve")}

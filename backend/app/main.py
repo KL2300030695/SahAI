@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from app.config import (
@@ -56,6 +58,7 @@ from app.crm.db import (
     record_cost,
     session_scope,
 )
+from app.crm.backends import get_crm_backend
 from app.crm.models import Call, CostRow, Customer
 from app.llm.client import LLMUnavailable, get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
@@ -69,6 +72,7 @@ from app.export import (
 )
 from app.guardrails import rules
 from app.integrations import firestore_sync, sheets
+from app.security import Principal, auth_enabled, get_principal, requires
 from app.schemas import (
     CheckName,
     CheckResult,
@@ -295,7 +299,8 @@ class ConsentBody(BaseModel):
 
 
 @app.post("/api/calls/{call_id}/consent")
-def record_consent(call_id: str, body: ConsentBody) -> dict:
+def record_consent(call_id: str, body: ConsentBody,
+    principal: Principal = Depends(requires("call"))) -> dict:
     """Open a call session. Nothing downstream runs until this succeeds."""
     data = _load_transcript(call_id)
     if not body.consent_ack:
@@ -387,8 +392,7 @@ async def ws_call(ws: WebSocket, call_id: str) -> None:
         return
 
     orch = get_orchestrator()
-    with session_scope() as s:
-        crm = get_crm_snapshot(s, live.customer_id)
+    crm = get_crm_backend().read_snapshot(live.customer_id)
 
     await ws.send_json(
         {
@@ -485,7 +489,11 @@ class LiveStartBody(BaseModel):
 
 
 @app.post("/api/live/start")
-def live_start(body: LiveStartBody, db: Session = Depends(get_session)) -> dict:
+def live_start(
+    body: LiveStartBody,
+    db: Session = Depends(get_session),
+    principal: Principal = Depends(requires("call")),
+) -> dict:
     """Open a live microphone call session.
 
     Consent is captured here, in the same call that creates the session, so the
@@ -563,8 +571,7 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
 
     orch = get_orchestrator()
     llm = get_llm()
-    with session_scope() as s:
-        crm = get_crm_snapshot(s, live.customer_id)
+    crm = get_crm_backend().read_snapshot(live.customer_id)
 
     await ws.send_json(
         {
@@ -738,7 +745,8 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
 
 
 @app.post("/api/calls/{call_id}/finalise")
-def finalise(call_id: str) -> dict:
+def finalise(call_id: str,
+    principal: Principal = Depends(requires("call"))) -> dict:
     live = LIVE.get(call_id)
     if live is None:
         raise HTTPException(400, "call not started; record consent first")
@@ -763,9 +771,10 @@ def finalise(call_id: str) -> dict:
 
     orch = get_orchestrator()
 
-    with session_scope() as s:
-        crm = get_crm_snapshot(s, live.customer_id)
-        dnc = is_do_not_call(s, live.customer_id)
+    # Through the configured connector, not straight to SQLite. Swapping in a
+    # real CRM is a .env change, not an edit here.
+    crm = get_crm_backend().read_snapshot(live.customer_id)
+    dnc = get_crm_backend().is_do_not_call(live.customer_id)
 
     result = orch.finalise_call(
         call_id=call_id,
@@ -814,7 +823,14 @@ def finalise(call_id: str) -> dict:
 
 
 class ApprovalBody(BaseModel):
-    approver_id: str
+    """Note what is absent: the approver's name.
+
+    It used to be a field here, which meant the identity on a customer-record
+    write was whatever the caller typed. It now comes from the credential --
+    see `app/security.py`. A gate that lets the caller name themselves is a
+    convention, not a control.
+    """
+
     edited_summary: Optional[str] = None
     edited_followup_body: Optional[str] = None
     decision: str = "approve"  # approve | reject
@@ -830,7 +846,11 @@ def _blocking_checks(call: Call) -> list[dict]:
 
 
 @app.post("/api/calls/{call_id}/approve")
-def approve(call_id: str, body: ApprovalBody) -> dict:
+def approve(
+    call_id: str,
+    body: ApprovalBody,
+    principal: Principal = Depends(requires("approve")),
+) -> dict:
     """The human oversight gate.
 
     This is the ONLY path that writes an AI-proposed patch to a customer record
@@ -850,9 +870,6 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
     in the trace under the approver's name, because the accountable act is a
     human choosing to send different words, not a human dismissing a warning.
     """
-    if not body.approver_id.strip():
-        raise HTTPException(400, "approver_id is required — approvals are attributed")
-
     with session_scope() as s:
         call = s.get(Call, call_id)
         if not call:
@@ -860,7 +877,7 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
 
         if body.decision == "reject":
             call.send_status = "rejected"
-            call.approved_by = body.approver_id
+            call.approved_by = principal.audit_name
             call.approved_at = datetime.now(timezone.utc)
             return {"call_id": call_id, "send_status": "rejected"}
 
@@ -901,7 +918,7 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
                     passed=True,
                     enforced_by="code",
                     detail=(
-                        f"Draft was blocked; {body.approver_id.strip()} rewrote the "
+                        f"Draft was blocked; {principal.audit_name} rewrote the "
                         f"message and sent their own wording."
                     ),
                 )
@@ -916,7 +933,7 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
             original["body"] = edited_body
             call.followup_json = json.dumps(original)
 
-        ok, message = apply_approved_patch(s, call_id, body.approver_id)
+        ok, message = apply_approved_patch(s, call_id, principal.audit_name)
         if not ok:
             raise HTTPException(400, message)
 
@@ -1094,8 +1111,7 @@ async def audio_turn(
         ts=float(len(live.history)),
     )
 
-    with session_scope() as s:
-        crm = get_crm_snapshot(s, live.customer_id)
+    crm = get_crm_backend().read_snapshot(live.customer_id)
 
     assist = await asyncio.to_thread(
         get_orchestrator().handle_turn,
@@ -1192,11 +1208,16 @@ def integrations_status() -> dict:
     Exposed so "the data is in Firestore" is checkable rather than asserted --
     the same reason the routing policy is served at /api/policy.
     """
-    return {"firestore": firestore_sync.status(), "sheets": sheets.status()}
+    return {
+        "crm": get_crm_backend().describe(),
+        "firestore": firestore_sync.status(),
+        "sheets": sheets.status(),
+    }
 
 
 @app.post("/api/integrations/sync")
-def integrations_sync(call_id: Optional[str] = None) -> dict:
+def integrations_sync(call_id: Optional[str] = None,
+    principal: Principal = Depends(requires("integrate"))) -> dict:
     """Backfill. Push one call, or every call, to Firestore and Sheets.
 
     A full sync writes Sheets in one pass rather than per call. Upserting one
@@ -1225,3 +1246,101 @@ def integrations_sync(call_id: Optional[str] = None) -> dict:
         "sheets": url,
     }
 
+
+@app.get("/api/me")
+def whoami(principal: Principal = Depends(get_principal)) -> dict:
+    """Who the caller is, and what they may do.
+
+    The dashboard reads this to decide whether to ask an agent to type their
+    name at the approval gate or to show the identity it will sign with. A UI
+    that asks for a name it is going to ignore teaches the wrong thing about
+    where the authority comes from.
+    """
+    return {
+        "name": principal.name,
+        "role": principal.role,
+        "authenticated": principal.authenticated,
+        "auth_enabled": auth_enabled(),
+        "can": {
+            a: principal.can(a) for a in ("read", "call", "approve", "integrate")
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Operations: correlation, liveness, readiness, and the built dashboard
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def _request_id(request: Request, call_next):
+    """Stamp every request and response with an id, and time it.
+
+    A call fans out across six agents and two mirrors; without a correlation id
+    the only way to tie a slow turn to its log lines is by timestamp, which
+    stops working the moment two agents are on the phone at once.
+    """
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    response.headers["X-Response-Time-ms"] = f"{(time.perf_counter() - started) * 1000:.1f}"
+    return response
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    """Liveness: is the process up. Deliberately checks nothing else.
+
+    A liveness probe that touches a dependency restarts a healthy container
+    because a database blipped, which turns a brief outage into a crash loop.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> Response:
+    """Readiness: can this instance actually serve a call.
+
+    Checks the two things whose absence makes every request fail rather than
+    degrade — the database and the knowledge-base index. The model provider is
+    *not* checked: a quota failure is reported per request as a 503 with an
+    explanation, and pulling the instance out of rotation for it would take the
+    dashboard down as well.
+    """
+    checks: dict[str, Any] = {}
+    ok = True
+
+    try:
+        with session_scope() as s:
+            s.execute(sa_text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:  # noqa: BLE001
+        checks["database"] = f"{type(e).__name__}"
+        ok = False
+
+    try:
+        from app.rag.retriever import get_retriever
+
+        checks["knowledge_base"] = f"{len(get_retriever().records)} chunks"
+    except Exception as e:  # noqa: BLE001
+        checks["knowledge_base"] = f"{type(e).__name__} — run app.rag.ingest"
+        ok = False
+
+    checks["auth"] = "enforced" if auth_enabled() else "open"
+    checks["crm"] = get_crm_backend().describe()["connector"]
+    return Response(
+        content=json.dumps({"ready": ok, "checks": checks}),
+        status_code=200 if ok else 503,
+        media_type="application/json",
+    )
+
+
+# The container build drops the compiled dashboard here. Mounted last so it
+# cannot shadow an API route, and skipped entirely in development where Vite
+# serves the frontend itself.
+_STATIC = BACKEND_DIR / "static"
+if _STATIC.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="dashboard")

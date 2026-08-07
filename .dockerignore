@@ -1,0 +1,18 @@
+# Never build a credential into an image.
+.env
+.env.*
+secrets/
+*service-account*.json
+
+.git/
+.gitignore
+**/__pycache__/
+**/.pytest_cache/
+backend/.venv/
+backend/data/
+backend/exports/
+backend/uploads/
+backend/uvicorn.*
+frontend/node_modules/
+frontend/dist/
+*.md

@@ -45,6 +45,27 @@ class Settings(BaseSettings):
     chroma_dir: str = "./app/rag/store"
     cors_origins: str = "http://localhost:5173"
 
+    # --- CRM connector ----------------------------------------------------
+    # "sqlite" (shipped default) or "rest" for any HTTP CRM. The REST adapter
+    # is configured, not coded: point it at a base URL and map field names.
+    #   CRM_BACKEND=rest
+    #   CRM_BASE_URL=https://crm.internal/api/v1
+    #   CRM_FIELD_MAP={"kyc_status":"KYC_Status__c"}
+    crm_backend: str = "sqlite"
+    crm_base_url: str = ""
+    crm_token: str = ""
+    crm_field_map: str = ""
+
+    # --- access control ---------------------------------------------------
+    # One principal per comma-separated entry: key:Display Name:role
+    #   API_KEYS=k_live_abc:Priya Nair:agent,k_live_xyz:Ravi Menon:admin
+    # Roles: viewer (read) | agent (read, call, approve) | admin (+ integrate).
+    # With auth off the app runs open under a single local principal, which is
+    # what a fresh clone does; that state is reported at /api/health and stamped
+    # into every approval so the audit trail cannot hide it.
+    auth_enabled: int = 0
+    api_keys: str = ""
+
     # --- Google (Firestore + Sheets) -------------------------------------
     # One service-account JSON serves both when they live in the same GCP or
     # Firebase project, which is the setup the README describes. Every field

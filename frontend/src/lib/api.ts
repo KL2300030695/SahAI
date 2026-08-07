@@ -1,6 +1,28 @@
 import type { CallDetail, CallSummary, PostCallResult } from "./types";
 
 /**
+ * The dashboard's credential.
+ *
+ * Set VITE_API_KEY when the backend runs with AUTH_ENABLED=1. Left unset the
+ * header is simply absent, which is what a fresh clone does — reads stay open
+ * and writes are refused with a 401 that says which header is missing.
+ *
+ * A browser cannot set headers on a WebSocket handshake, so socket URLs carry
+ * the key as a query parameter instead. That is a real difference in exposure
+ * (a URL is likelier to be logged by a proxy), which is why it is the exception
+ * rather than the rule.
+ */
+const API_KEY: string = (import.meta as any).env?.VITE_API_KEY ?? "";
+
+export function authHeaders(): Record<string, string> {
+  return API_KEY ? { "X-API-Key": API_KEY } : {};
+}
+
+export function withKey(url: string): string {
+  return API_KEY ? `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(API_KEY)}` : url;
+}
+
+/**
  * Unwrap a response, turning a failure into a sentence rather than a status.
  *
  * The dashboard used to show "500 Internal Server Error" verbatim when the Groq
@@ -33,29 +55,29 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  health: () => fetch("/api/health").then(json<{ status: string; mode: string }>),
+  health: () => fetch("/api/health", { headers: authHeaders() }).then(json<{ status: string; mode: string }>),
 
-  policy: () => fetch("/api/policy").then(json<any>),
+  policy: () => fetch("/api/policy", { headers: authHeaders() }).then(json<any>),
 
-  listCalls: () => fetch("/api/calls").then(json<CallSummary[]>),
+  listCalls: () => fetch("/api/calls", { headers: authHeaders() }).then(json<CallSummary[]>),
 
-  getCall: (id: string) => fetch(`/api/calls/${id}`).then(json<CallDetail>),
+  getCall: (id: string) => fetch(`/api/calls/${id}`, { headers: authHeaders() }).then(json<CallDetail>),
 
   /** Opens the call session. Every downstream step is gated on this. */
   consent: (id: string, agentName: string) =>
     fetch(`/api/calls/${id}/consent`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ consent_ack: true, agent_name: agentName }),
     }).then(json<{ call_id: string; consent_ack: boolean }>),
 
   finalise: (id: string) =>
-    fetch(`/api/calls/${id}/finalise`, { method: "POST" }).then(json<PostCallResult>),
+    fetch(`/api/calls/${id}/finalise`, { method: "POST", headers: authHeaders() }).then(json<PostCallResult>),
 
   approve: (
     id: string,
     body: {
-      approver_id: string;
+      // No approver_id: the server takes the identity from the credential.
       decision: "approve" | "reject";
       edited_summary?: string;
       edited_followup_body?: string;
@@ -63,21 +85,21 @@ export const api = {
   ) =>
     fetch(`/api/calls/${id}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }).then(json<any>),
 
   transcribe: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch("/api/transcribe", { method: "POST", body: fd }).then(json<any>);
+    return fetch("/api/transcribe", { method: "POST", body: fd, headers: authHeaders() }).then(json<any>);
   },
 
   /** Open a live microphone call. Consent is captured in the same request. */
   liveStart: (customerId: string, agentName: string) =>
     fetch("/api/live/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         customer_id: customerId,
         agent_name: agentName,
@@ -91,20 +113,32 @@ export const api = {
     fd.append("file", file);
     return fetch(
       `/api/live/${callId}/audio-turn?speaker=${speaker}`,
-      { method: "POST", body: fd },
+      { method: "POST", body: fd, headers: authHeaders() },
     ).then(json<any>);
   },
 
-  customers: () => fetch("/api/customers").then(json<any[]>),
+  /** Who the credential says we are, and what it may do. */
+  me: () =>
+    fetch("/api/me", { headers: authHeaders() }).then(
+      json<{
+        name: string;
+        role: string;
+        authenticated: boolean;
+        auth_enabled: boolean;
+        can: Record<string, boolean>;
+      }>,
+    ),
+
+  customers: () => fetch("/api/customers", { headers: authHeaders() }).then(json<any[]>),
 
   /** The record as it stands, so approval can show before → after. */
   customer: (id: string) =>
-    fetch(`/api/customers/${id}`).then(json<Record<string, unknown>>),
+    fetch(`/api/customers/${id}`, { headers: authHeaders() }).then(json<Record<string, unknown>>),
 };
 
 export function openCallSocket(callId: string): WebSocket {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  return new WebSocket(`${proto}://${location.host}/ws/call/${callId}`);
+  return new WebSocket(withKey(`${proto}://${location.host}/ws/call/${callId}`));
 }
 
 export const fmtUsd = (n: number) =>

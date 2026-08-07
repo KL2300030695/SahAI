@@ -402,6 +402,93 @@ contradictory ones.
 
 ---
 
+## Deploying it, and plugging it into your stack
+
+### One command
+
+```bash
+docker compose up --build      # → http://localhost:8000
+```
+
+One service, not three: the dashboard is built and served by the same process
+that serves the API, so there is no proxy to configure and no CORS to get wrong
+between a laptop and a server. The knowledge base is indexed at image build
+time — otherwise the first call of a demo pays to embed 19 documents and a cold
+container looks broken rather than slow.
+
+| | |
+|---|---|
+| `GET /healthz` | liveness — checks nothing else, so a database blip cannot restart a healthy container into a crash loop |
+| `GET /readyz` | readiness — database + knowledge-base index. **Not** the model provider: a quota failure is already a per-request 503 with an explanation, and pulling the instance would take the dashboard down too |
+| every response | `X-Request-ID` and `X-Response-Time-ms` — a call fans out across six agents and two mirrors, and timestamps stop correlating the moment two agents are on the phone at once |
+
+Credentials are mounted read-only and excluded from the build context, so the
+image can be shared without shipping secrets.
+
+### Access control, and who signs an approval
+
+`POST /approve` is the only route that writes an AI-proposed patch onto a
+customer record. Its docstring said no agent could call it. That was true only
+in the sense that none *did* — the approver's name arrived as a string in the
+request body, so anyone who could reach the port could approve as anyone,
+including a script typing a colleague's name.
+
+**The approver is now who the credential says they are, and the body no longer
+carries a name at all.** The dashboard shows the identity it will sign with
+instead of asking for one, because a field the server ignores teaches the wrong
+thing about where the authority comes from.
+
+```ini
+AUTH_ENABLED=1
+API_KEYS=k_live_abc:Priya Nair:agent,k_live_xyz:Ravi Menon:admin
+```
+
+| Role | read | run calls | approve | sync integrations |
+|---|:--:|:--:|:--:|:--:|
+| `viewer` | ✅ | | | |
+| `agent` | ✅ | ✅ | ✅ | |
+| `admin` | ✅ | ✅ | ✅ | ✅ |
+
+Keys are compared with `hmac.compare_digest`, reads stay open so a fresh clone
+still shows a working dashboard, and writes made while auth is off are stamped
+`(unauthenticated)` in the audit trail — otherwise a year later nobody could
+tell a signed approval from one made on an open port.
+
+### Swapping in a real CRM
+
+The pipeline talks to a four-method port, not to SQLite:
+
+```
+read_snapshot · is_do_not_call · apply_patch · describe
+```
+
+`is_do_not_call` is deliberately *not* folded into the snapshot even though both
+read the same record. A snapshot is advisory context for a language model;
+do-not-call is a legal obligation checked in code before drafting. Merging them
+would make the obligation depend on a field surviving a model's attention.
+
+Two adapters ship. `SqliteCrm` is the demo default. `RestCrm` talks to any HTTP
+CRM and is **configured, not coded** — including the field names, because
+`kyc_status` here is `KYC_Status__c` there:
+
+```ini
+CRM_BACKEND=rest
+CRM_BASE_URL=https://crm.internal/api/v1
+CRM_TOKEN=...
+CRM_FIELD_MAP={"kyc_status":"KYC_Status__c"}
+```
+
+Its failure policies differ by method on purpose, and each has a test: a failed
+**read** degrades to less context and the call continues; a failed
+**do-not-call** check returns `True`, because an unreachable CRM is not
+permission to call someone who may have opted out; a failed **write** reports
+itself and leaves the local state pending rather than losing it silently.
+
+`RestCrm` is tested against a real stub HTTP server rather than a mock, so the
+claim is "this works against an HTTP CRM", not "we imagined one".
+
+---
+
 ## Try it
 
 ### The 90-second demo

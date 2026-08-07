@@ -1,0 +1,31 @@
+# docker compose up --build   ->   http://localhost:8000
+#
+# One service on purpose. The dashboard is served by the same process that
+# serves the API, so there is no proxy to configure and no CORS to get wrong.
+
+services:
+  sahai:
+    build: .
+    image: sahai:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Inside the container the built dashboard is same-origin, so the browser
+      # never issues a cross-origin request and this list is only for anyone
+      # running the Vite dev server against a containerised API.
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:8000"
+      DATABASE_URL: "sqlite:///./data/sahai.db"
+    volumes:
+      # The CRM and the cost ledger must survive `docker compose down`. Without
+      # this, every restart silently discards the measured cost history the
+      # pitch quotes.
+      - sahai-data:/srv/data
+      # Service-account JSONs are mounted read-only rather than baked into the
+      # image, so the image can be shared without shipping credentials.
+      - ./secrets:/srv/secrets:ro
+    restart: unless-stopped
+
+volumes:
+  sahai-data:
