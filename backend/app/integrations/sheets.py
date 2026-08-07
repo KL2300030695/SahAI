@@ -44,7 +44,7 @@ SCOPES = [
 
 def enabled() -> bool:
     s = get_settings()
-    return bool(s.sheets_enabled) and s.google_ready and bool(s.sheets_id)
+    return bool(s.sheets_enabled) and s.sheets_ready and bool(s.sheets_id)
 
 
 def _get_client() -> Any:
@@ -59,7 +59,7 @@ def _get_client() -> Any:
 
         s = get_settings()
         creds = service_account.Credentials.from_service_account_file(
-            str(s.google_credentials_file), scopes=SCOPES
+            str(s.sheets_credentials_file), scopes=SCOPES
         )
         _client = gspread.authorize(creds)
         return _client
@@ -90,13 +90,29 @@ def _as_row(columns: list[str], row: dict[str, Any]) -> list[str]:
     return ["" if row.get(c) is None else str(row.get(c, "")) for c in columns]
 
 
+def _client_email() -> Optional[str]:
+    """Which identity the sheet must be shared with. Surfaced because the
+    address is buried in a JSON file and is the single most common thing
+    missing when a write fails."""
+    import json
+
+    path = get_settings().sheets_credentials_file
+    if not path:
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("client_email")
+    except Exception:
+        return None
+
+
 def status() -> dict[str, Any]:
     s = get_settings()
     return {
         "enabled": bool(s.sheets_enabled),
-        "credentials_found": s.google_ready,
+        "credentials_found": s.sheets_ready,
         "sheet_id_set": bool(s.sheets_id),
         "ready": enabled(),
+        "service_account": _client_email(),
         "url": (
             f"https://docs.google.com/spreadsheets/d/{s.sheets_id}"
             if s.sheets_id

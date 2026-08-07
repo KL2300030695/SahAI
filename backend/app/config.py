@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -65,13 +66,15 @@ class Settings(BaseSettings):
     #: Prefix so several people can share one Firestore project without
     #: overwriting each other's calls during a hackathon.
     firestore_prefix: str = "sahai"
+    #: Only needed when Sheets lives in a different GCP project from
+    #: Firestore. Blank falls back to GOOGLE_CREDENTIALS_PATH.
+    sheets_credentials_path: str = ""
     sheets_enabled: int = 0
     #: The long id from the sheet URL: docs.google.com/spreadsheets/d/<THIS>/edit
     sheets_id: str = ""
 
-    @property
-    def google_credentials_file(self) -> Optional[Path]:
-        """Absolute path to the service-account JSON, or None.
+    def _resolve_credentials(self, raw: str) -> Optional[Path]:
+        """Absolute path to a service-account JSON, or None.
 
         Resolved against the repo root rather than the process CWD. uvicorn is
         started from `backend/`, so a natural-looking `./secrets/key.json` in a
@@ -79,7 +82,7 @@ class Settings(BaseSettings):
         integration silently reports "no credentials" while the file sits right
         there. The sqlite URL already needed the same treatment.
         """
-        raw = (self.google_credentials_path or "").strip()
+        raw = (raw or "").strip()
         if not raw:
             return None
         p = Path(raw)
@@ -92,8 +95,31 @@ class Settings(BaseSettings):
         return None
 
     @property
+    def google_credentials_file(self) -> Optional[Path]:
+        """Credentials for Firestore, and the default for everything else."""
+        return self._resolve_credentials(self.google_credentials_path)
+
+    @property
+    def sheets_credentials_file(self) -> Optional[Path]:
+        """Credentials for Sheets, falling back to the shared one.
+
+        Separate because the two services need not live in the same GCP project
+        -- Firestore comes with a Firebase project, while a Sheets service
+        account is often created standalone. Assuming one file for both meant
+        enabling Sheets silently re-pointed Firestore at the wrong project.
+        """
+        return (
+            self._resolve_credentials(self.sheets_credentials_path)
+            or self.google_credentials_file
+        )
+
+    @property
     def google_ready(self) -> bool:
         return self.google_credentials_file is not None
+
+    @property
+    def sheets_ready(self) -> bool:
+        return self.sheets_credentials_file is not None
 
     @property
     def stream_wss_url(self) -> str:
