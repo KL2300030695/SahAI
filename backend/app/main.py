@@ -68,6 +68,7 @@ from app.export import (
     trace_rows,
 )
 from app.guardrails import rules
+from app.integrations import firestore_sync, sheets
 from app.schemas import (
     CheckName,
     CheckResult,
@@ -352,6 +353,19 @@ def record_consent(call_id: str, body: ConsentBody) -> dict:
         # "run it again" means to anyone watching.
         s.query(CostRow).filter(CostRow.call_id == call_id).delete()
         call.cost_usd = 0.0
+        # Consent marks the start of *this* run. Without resetting these, a
+        # replayed scenario keeps its original started_at and pairs it with
+        # today's ended_at -- the exported CSV then reports a five-hour call.
+        call.started_at = live.consent_at
+        call.ended_at = None
+        # A previous run's approval must not survive into this one. Leaving it
+        # produced a row reading "approved_by Subhash" next to
+        # "send_status pending_agent_approval" -- two fields disagreeing about
+        # whether a human had signed anything.
+        call.send_status = "pending_agent_approval"
+        call.approved_by = None
+        call.approved_at = None
+        call.guardrail_trace_json = "[]"
 
     return {"call_id": call_id, "consent_ack": True, "consent_at": live.consent_at}
 
@@ -1138,6 +1152,9 @@ def finalise(call_id: str) -> dict:
             )
 
     payload["frontier_usd"] = live.meter.frontier_baseline_usd()
+    # Mirrored after the local write, never before: SQLite is the record, and a
+    # cloud outage must not lose a summarised call.
+    payload["mirrored"] = _publish(call_id)
     return payload
 
 
@@ -1257,7 +1274,7 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
         if followup.get("body"):
             call.send_status = "sent"
 
-        return {
+        result = {
             "call_id": call_id,
             "send_status": call.send_status,
             "approved_by": call.approved_by,
@@ -1265,6 +1282,27 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
             "overrode": [c.name.value for c in overrides],
             "message": message,
         }
+        customer = s.get(Customer, call.customer_id)
+        snapshot = (
+            {
+                c.name: getattr(customer, c.name)
+                for c in Customer.__table__.columns
+            }
+            if customer
+            else None
+        )
+
+    # Outside the session: the approval is committed before anything is
+    # mirrored. An approval that succeeded locally is not un-done by a network
+    # failure, and the status endpoint reports the mirror lag instead.
+    if snapshot:
+        snapshot = {
+            k: (v.isoformat() if hasattr(v, "isoformat") else v)
+            for k, v in snapshot.items()
+        }
+        firestore_sync.sync_customer(snapshot)
+    result["mirrored"] = _publish(call_id)
+    return result
 
 
 @app.get("/api/calls/{call_id}/ledger")
@@ -1468,3 +1506,46 @@ def export_trace(call_id: Optional[str] = None) -> Response:
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+def _publish(call_id: str) -> dict[str, Any]:
+    """Push one call to every configured destination, from one set of rows.
+
+    The rows come from `app.export`, the same builders the CSV endpoints use, so
+    the file, the Firestore document and the spreadsheet row can never disagree
+    about what a call cost or whether a human signed it.
+
+    Best-effort by design: a Firestore outage or a revoked Sheets token must not
+    fail a call that has already been summarised and written locally. SQLite has
+    the truth; these are mirrors of it.
+    """
+    with session_scope() as s:
+        call = list(call_rows(s, call_id))
+        stages = list(trace_rows(s, call_id))
+    if not call:
+        return {"firestore": False, "sheets": None}
+    return {
+        "firestore": firestore_sync.sync_call(call[0], stages),
+        "sheets": sheets.push_call(call[0], stages),
+    }
+
+
+@app.get("/api/integrations/status")
+def integrations_status() -> dict:
+    """What is configured, what is reachable, and what has failed.
+
+    Exposed so "the data is in Firestore" is checkable rather than asserted --
+    the same reason the routing policy is served at /api/policy.
+    """
+    return {"firestore": firestore_sync.status(), "sheets": sheets.status()}
+
+
+@app.post("/api/integrations/sync")
+def integrations_sync(call_id: Optional[str] = None) -> dict:
+    """Backfill. Push one call, or every call, to Firestore and Sheets."""
+    if call_id:
+        return {call_id: _publish(call_id)}
+    with session_scope() as s:
+        ids = [c.call_id for c in s.query(Call).all()]
+    return {cid: _publish(cid) for cid in ids}
+

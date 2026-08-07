@@ -42,3 +42,6 @@ Thumbs.db
 
 backend/exports/
 backend/uvicorn.*
+secrets/
+*service-account*.json
+*-firebase-adminsdk-*.json

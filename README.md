@@ -345,7 +345,63 @@ cd frontend && npm install && npm run dev
 
 Open **http://localhost:5173**.
 
-### 5. Optional — a real phone line
+### 5. Optional — Firestore and Google Sheets
+
+Off by default. Unset, SahAI writes to SQLite and CSV and behaves identically —
+which is what happens when someone clones this repo, so that path is tested.
+
+Turned on, every finalised call and every approval is mirrored to Firestore and
+upserted into a Google Sheet. **SQLite stays the system of record**: `get_crm_snapshot`
+runs on every turn of a live call, and a 50–200 ms round trip there would spend a
+fifth of the latency budget on network and make the demo depend on the wifi. All
+the data reaches Firestore; the customer on the phone never waits for it.
+
+Both mirrors are best-effort. A Firestore outage or a revoked Sheets token is
+counted and reported at `/api/integrations/status`, never raised — an agent
+mid-conversation should not lose a call because a spreadsheet is unreachable.
+
+**One service account serves both.** In the [Firebase console](https://console.firebase.google.com):
+
+1. **Project settings → Service accounts → Generate new private key** → downloads a JSON file.
+   (This is *not* the `firebaseConfig` snippet shown under "Your apps" — that one
+   is public client config for the browser and cannot authenticate a server.)
+2. Save it to `secrets/firebase-service-account.json` — already gitignored.
+3. **Build → Firestore Database → Create database** if you have not yet.
+4. For Sheets: enable the **Google Sheets API** in the linked Google Cloud
+   project, create a spreadsheet, and share it with the service account's
+   `client_email` (it is inside the JSON) as an **Editor**.
+
+```ini
+GOOGLE_CREDENTIALS_PATH=./secrets/firebase-service-account.json
+FIRESTORE_ENABLED=1
+FIRESTORE_PROJECT=your-project-id
+FIRESTORE_PREFIX=sahai          # so several people can share one project
+SHEETS_ENABLED=1
+SHEETS_ID=                      # the id from the sheet URL: /spreadsheets/d/<THIS>/edit
+```
+
+Check it and backfill anything recorded before you switched it on:
+
+```bash
+curl localhost:8000/api/integrations/status         # what is configured and reachable
+curl -X POST localhost:8000/api/integrations/sync   # push every stored call
+```
+
+Firestore layout, and the two Sheets tabs, carry the **same rows** the CSV export
+produces — one row builder feeds all three, so a file, a document and a
+spreadsheet row can never disagree about what a call cost:
+
+```
+sahai_calls/{call_id}                one document per call   →  "Calls" tab
+sahai_calls/{call_id}/stages/{0000}  the pipeline trace      →  "Trace" tab
+sahai_customers/{customer_id}        CRM record as written
+```
+
+Replaying a scenario **overwrites** its row and its stages rather than appending,
+matching the local ledger. A demo rehearsed three times shows one row, not three
+contradictory ones.
+
+### 6. Optional — a real phone line
 
 ```ini
 PUBLIC_BASE_URL=https://your-tunnel.ngrok-free.dev

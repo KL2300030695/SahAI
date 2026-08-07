@@ -25,3 +25,10 @@ SQLAlchemy==2.0.36
 pytest==8.3.4
 pytest-asyncio==0.25.0
 httpx==0.28.1
+
+# Optional — Firestore mirror and Google Sheets export. The app runs without
+# these; every code path that imports them is guarded by a config flag.
+google-cloud-firestore==2.28.1
+gspread==6.2.1
+google-auth==2.56.3
+

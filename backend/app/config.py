@@ -54,6 +54,29 @@ class Settings(BaseSettings):
     # is configurable per Twilio number via a ?customer_id= query param instead.
     default_customer_id: str = "CUST-1042"
 
+    # --- Google (Firestore + Sheets) -------------------------------------
+    # One service-account JSON serves both when they live in the same GCP or
+    # Firebase project, which is the setup the README describes. Every field
+    # here is optional: unset, the app runs exactly as it does today, writing
+    # only to SQLite and CSV. Nothing about the demo depends on the network.
+    google_credentials_path: str = ""
+    firestore_enabled: int = 0
+    firestore_project: str = ""
+    #: Prefix so several people can share one Firestore project without
+    #: overwriting each other's calls during a hackathon.
+    firestore_prefix: str = "sahai"
+    sheets_enabled: int = 0
+    #: The long id from the sheet URL: docs.google.com/spreadsheets/d/<THIS>/edit
+    sheets_id: str = ""
+
+    @property
+    def google_ready(self) -> bool:
+        from pathlib import Path as _Path
+
+        return bool(self.google_credentials_path) and _Path(
+            self.google_credentials_path
+        ).exists()
+
     @property
     def stream_wss_url(self) -> str:
         base = self.public_base_url.rstrip("/")
