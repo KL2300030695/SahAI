@@ -1542,10 +1542,31 @@ def integrations_status() -> dict:
 
 @app.post("/api/integrations/sync")
 def integrations_sync(call_id: Optional[str] = None) -> dict:
-    """Backfill. Push one call, or every call, to Firestore and Sheets."""
+    """Backfill. Push one call, or every call, to Firestore and Sheets.
+
+    A full sync writes Sheets in one pass rather than per call. Upserting one
+    row at a time needs several reads of the sheet each time, which for thirty
+    calls exceeds Google's 60-reads-per-minute limit and leaves the tab half
+    written -- indistinguishable, to anyone looking at it, from missing data.
+    """
     if call_id:
         return {call_id: _publish(call_id)}
+
     with session_scope() as s:
-        ids = [c.call_id for c in s.query(Call).all()]
-    return {cid: _publish(cid) for cid in ids}
+        calls = list(call_rows(s))
+        stages = list(trace_rows(s))
+
+    # Firestore has no equivalent limit and is cheap per document, so it stays
+    # per call and keeps its subcollection layout.
+    fs = {c["call_id"]: firestore_sync.sync_call(c, [
+        st for st in stages if st["call_id"] == c["call_id"]
+    ]) for c in calls}
+
+    url = sheets.replace_all(calls, stages)
+    return {
+        "calls": len(calls),
+        "stages": len(stages),
+        "firestore_ok": sum(1 for v in fs.values() if v),
+        "sheets": url,
+    }
 

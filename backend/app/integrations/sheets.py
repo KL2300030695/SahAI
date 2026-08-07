@@ -221,6 +221,52 @@ def push_call(
         return None
 
 
+def replace_all(
+    calls: list[dict[str, Any]], stages: list[dict[str, Any]]
+) -> Optional[str]:
+    """Rewrite both tabs from scratch in one pass. Used for a bulk sync.
+
+    `push_call` re-reads the sheet on every call so it can upsert one row, which
+    is right for a single finalised call and badly wrong for thirty-eight: the
+    backfill made roughly 150 reads in a burst and Google cut it off at its
+    60-reads-per-minute limit, leaving the sheet half-populated and looking like
+    the data was incomplete rather than rate-limited.
+
+    A full sync already knows the entire truth, so it does not need to read the
+    sheet at all to decide what to write. One clear plus one write per tab
+    replaces ~150 reads, and the result cannot drift from the database because
+    it *is* the database.
+    """
+    if not enabled():
+        return None
+    try:
+        book = _sheet()
+
+        calls_ws = _tab(book, CALLS_TAB, CALL_COLUMNS)
+        calls_ws.clear()
+        calls_ws.update(
+            [CALL_COLUMNS] + [_as_row(CALL_COLUMNS, c) for c in calls],
+            "A1",
+            value_input_option="RAW",
+        )
+        calls_ws.freeze(rows=1)
+
+        trace_ws = _tab(book, TRACE_TAB, TRACE_COLUMNS)
+        trace_ws.clear()
+        trace_ws.update(
+            [TRACE_COLUMNS] + [_as_row(TRACE_COLUMNS, s) for s in stages],
+            "A1",
+            value_input_option="RAW",
+        )
+        trace_ws.freeze(rows=1)
+
+        _stats["rows"] += len(calls) + len(stages)
+        return f"https://docs.google.com/spreadsheets/d/{get_settings().sheets_id}"
+    except Exception as e:  # noqa: BLE001
+        _record_failure(e)
+        return None
+
+
 def reset_for_tests() -> None:
     global _client
     _client = None
