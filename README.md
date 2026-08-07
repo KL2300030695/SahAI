@@ -61,7 +61,7 @@ follow-up for a drop-off — and then stops and waits for a human.
                 │                          ▼
   ┌─────────────┴──────────────────────────────────────────────┐
   │                    FastAPI  (app/main.py)                   │
-  │  /ws/live  ·  /ws/call  ·  /ws/telephony  ·  /ws/observe    │
+  │  /ws/live  ·  /ws/call  ·  CSV + Firestore + Sheets export  │
   │  consent gate · approval gate · CSV export                  │
   └─────────────┬──────────────────────────────────────────────┘
                 │
@@ -80,9 +80,9 @@ follow-up for a drop-off — and then stops and waits for a human.
         ┌──────────────┼──────────────┬──────────────────┐
         ▼              ▼              ▼                  ▼
    ┌─────────┐   ┌──────────┐   ┌──────────┐      ┌───────────┐
-   │  Groq   │   │ Chroma + │   │  SQLite  │      │  Twilio   │
-   │ 5 models│   │  BM25    │   │   CRM    │      │  (opt.)   │
-   │         │   │ 83 chunks│   │ + ledger │      │ media WS  │
+   │  Groq   │   │ Chroma + │   │  SQLite  │      │ Firestore │
+   │ 5 models│   │  BM25    │   │   CRM    │      │  + Sheets │
+   │         │   │ 83 chunks│   │ + ledger │      │  (opt.)   │
    └─────────┘   └──────────┘   └──────────┘      └───────────┘
 ```
 
@@ -101,7 +101,6 @@ backend/app/
 ├── rag/               ingest.py · retriever.py (hybrid + confidence floor)
 ├── crm/               models.py · db.py (the only writer of customer rows)
 ├── telemetry/         cost.py — per-decision ledger
-├── telephony/         twilio.py · audio.py (pure-Python G.711)
 └── export.py          calls.csv · trace.csv
 ```
 
@@ -280,7 +279,6 @@ never collide.
 | Lexical | **rank-bm25** | Embeddings are weak on "₹250" and "PAN"; BM25 is not |
 | CRM | **SQLAlchemy 2.0 + SQLite** | Zero-setup, real transactions, survives a restart |
 | Frontend | **React 18 + Vite 6 + TypeScript 5.7 + Tailwind 3.4** | Fast HMR; tokens as CSS custom properties |
-| Telephony | **Twilio Media Streams** (optional) | Dual-track audio gives exact speaker attribution |
 | Tests | **pytest 8.3** — 178, all offline | No network in the test suite |
 
 ---
@@ -401,16 +399,6 @@ Replaying a scenario **overwrites** its row and its stages rather than appending
 matching the local ledger. A demo rehearsed three times shows one row, not three
 contradictory ones.
 
-### 6. Optional — a real phone line
-
-```ini
-PUBLIC_BASE_URL=https://your-tunnel.ngrok-free.dev
-TWILIO_AUTH_TOKEN=your_token
-```
-
-Point your Twilio number's voice webhook at `POST {PUBLIC_BASE_URL}/api/telephony/voice`.
-Without a number, `python simulate_phone_call.py` (from `backend/`) drives the
-same code path end to end, signature verification included.
 
 ---
 
@@ -481,9 +469,11 @@ pipeline transcribes its own voice, files it as the customer, and answers
 itself. Nothing in the transcript looks wrong — it just fills with fluent
 sentences nobody said.
 
-**Speaker attribution is honest about its limits.** On the phone path the
-carrier sends each leg separately, so attribution is exact. On the browser mic
-everything is treated as the customer, and the UI says so rather than pretending.
+**Speaker attribution is honest about its limits.** Everything the microphone
+hears is attributed to the customer, and the interface says so rather than
+pretending otherwise. One microphone cannot separate two people in a room; a
+carrier-side integration could, by taking each leg of the call on its own track,
+but that needs a paid phone number and is out of scope here.
 
 **PII order matters.** A 16-digit card number's first 12 digits match the
 Aadhaar pattern. Redacting Aadhaar first produced `card [AADHAAR_REDACTED] 1111`
@@ -506,7 +496,6 @@ Written against the failures that actually happened, not for coverage:
 | `test_retrieval_gate.py` | Off-topic returns *no* source; BM25 is not a confidence signal |
 | `test_llm_unavailable.py` | A quota failure reads as a sentence, not a 500 |
 | `test_export.py` | The automation boundary is visible in the CSV |
-| `test_telephony.py` | G.711 codec, signature verification, VAD segmentation |
 
 ---
 
@@ -519,13 +508,20 @@ Stated rather than hidden.
   the only net under non-numeric assertions. This is the largest open gap.
 - **Live-call state is in memory.** A backend restart loses in-flight calls.
   Fine for one process; a real deployment needs Redis.
-- **Browser-mic calls cannot do two-party attribution.** Single-microphone
-  capture physically cannot separate speakers. Use the phone path for that.
+- **Two-party speaker attribution is not possible.** A single microphone cannot
+  separate two speakers, so every utterance it hears is attributed to the
+  customer. This assumes a speakerphone or a solo run. Real diarization needs
+  either a carrier integration (each leg on its own track) or a diarizing STT
+  model; both were out of scope.
 - **Groq's daily token cap is per *organization*, not per key.** Roughly seven
   full calls exhaust a free-tier day, and issuing a new API key on the same
   account does not reset it.
-- **Speaker diarization is not implemented.** The phone path gets attribution
-  from the carrier's separate tracks instead.
+- **Telephony was removed deliberately.** An earlier version accepted real
+  inbound calls over Twilio Media Streams and got exact speaker attribution from
+  the carrier's dual tracks. It was cut because a phone number is a recurring
+  cost and the browser-microphone path demonstrates the same pipeline. The
+  orchestrator never knew about it — it consumes transcript turns, whatever
+  produced them — so restoring it is a new adapter, not a redesign.
 
 ---
 

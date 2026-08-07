@@ -6,19 +6,17 @@ import type { CallSummary } from "../lib/types";
  * A moment of orientation, not a blank page. Three things: the line is open and
  * listening, what the co-pilot will do when someone speaks, and the opening
  * words already in front of the agent so they aren't composing them at the
- * moment the phone connects.
+ * moment the call opens.
  */
 export default function IdleState({
   calls,
   onScripted,
   onVoice,
-  onPhone,
   mode,
 }: {
   calls: CallSummary[];
   onScripted: (id: string) => void;
   onVoice: () => void;
-  onPhone: () => void;
   mode: string;
 }) {
   return (
@@ -47,7 +45,7 @@ export default function IdleState({
           settle those.
         </p>
 
-        {/* the opening words, ready before the phone connects */}
+        {/* the opening words, ready before the call opens */}
         <blockquote
           className="card mt-6 px-6 py-5"
           style={{ borderLeft: "3px solid var(--yourcall)" }}
@@ -63,7 +61,7 @@ export default function IdleState({
         {/* start a call */}
         <div className="mt-8">
           <span className="t-label">Start a call</span>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3">
             <button
               onClick={onVoice}
               className="card px-4 py-3.5 text-left transition-colors hover:border-[color:var(--ink)]"
@@ -75,19 +73,6 @@ export default function IdleState({
               <p className="text-[12.5px] leading-snug" style={{ color: "var(--graphite)" }}>
                 Speak and I'll follow along. Best on speakerphone — see the note
                 once you're in.
-              </p>
-            </button>
-            <button
-              onClick={onPhone}
-              className="card px-4 py-3.5 text-left transition-colors hover:border-[color:var(--ink)]"
-            >
-              <div className="mb-1 flex items-center gap-2 text-[13px] font-semibold">
-                Phone line
-                <span className="tag">twilio</span>
-              </div>
-              <p className="text-[12.5px] leading-snug" style={{ color: "var(--graphite)" }}>
-                A real inbound call. Each person arrives on their own track, so I
-                always know who's speaking.
               </p>
             </button>
           </div>

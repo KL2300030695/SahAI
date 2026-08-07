@@ -4,7 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
  * The co-pilot's voice — one engine for the whole app.
  *
  * Deliberately a module-level singleton rather than a hook per component. An
- * earlier version called `useSpeech()` inside LiveVoice and PhoneCall
+ * earlier version called `useSpeech()` inside each voice component
  * separately, which gave each of them its *own* `enabled` flag: switching the
  * voice on in one place left it off everywhere else, and the scripted-call path
  * had no instance at all so it never spoke. A voice is a property of the

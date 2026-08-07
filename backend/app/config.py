@@ -45,16 +45,6 @@ class Settings(BaseSettings):
     chroma_dir: str = "./app/rag/store"
     cors_origins: str = "http://localhost:5173"
 
-    # --- telephony -------------------------------------------------------
-    # Public base URL the carrier can reach (an ngrok/cloudflared tunnel in
-    # development). Must be https/wss — carriers refuse plain http webhooks.
-    public_base_url: str = ""
-    twilio_auth_token: str = ""
-    # Which CRM record an inbound call is attributed to. Real deployments look
-    # the caller up by number; the seeded customers carry masked phones, so this
-    # is configurable per Twilio number via a ?customer_id= query param instead.
-    default_customer_id: str = "CUST-1042"
-
     # --- Google (Firestore + Sheets) -------------------------------------
     # One service-account JSON serves both when they live in the same GCP or
     # Firebase project, which is the setup the README describes. Every field
@@ -120,15 +110,6 @@ class Settings(BaseSettings):
     @property
     def sheets_ready(self) -> bool:
         return self.sheets_credentials_file is not None
-
-    @property
-    def stream_wss_url(self) -> str:
-        base = self.public_base_url.rstrip("/")
-        if base.startswith("https://"):
-            base = "wss://" + base[len("https://") :]
-        elif base.startswith("http://"):
-            base = "ws://" + base[len("http://") :]
-        return f"{base}/ws/telephony/stream" if base else ""
 
     usd_to_inr: float = 83.0
 

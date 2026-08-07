@@ -21,7 +21,6 @@ import ApprovalBand from "./components/ApprovalBand";
 import IdleState from "./components/IdleState";
 import LiveVoice from "./components/LiveVoice";
 import AudioUpload from "./components/AudioUpload";
-import PhoneCall from "./components/PhoneCall";
 
 /**
  * Layout is horizontal bands, not columns.
@@ -36,11 +35,10 @@ type Phase =
   | "consent"
   | "scripted"
   | "voice"
-  | "phone"
   | "ended"
   | "review";
 
-type Kind = "scripted" | "voice" | "phone";
+type Kind = "scripted" | "voice";
 
 interface CustomerRow {
   customer_id: string;
@@ -98,7 +96,7 @@ export default function App() {
     () => (assists.length ? assists[assists.length - 1] : null),
     [assists],
   );
-  const live = phase === "scripted" || phase === "voice" || phase === "phone";
+  const live = phase === "scripted" || phase === "voice";
 
   function reset() {
     closeSocket();
@@ -133,13 +131,6 @@ export default function App() {
     setKind("voice");
     setDetail(null);
     setPhase("consent");
-  }
-
-  function choosePhone() {
-    reset();
-    setKind("phone");
-    setDetail(null);
-    setPhase("phone");
   }
 
   // ---- consent gate --------------------------------------------------
@@ -286,7 +277,6 @@ export default function App() {
           mode={mode}
           onScripted={chooseScripted}
           onVoice={chooseVoice}
-          onPhone={choosePhone}
         />
       )}
 
@@ -335,7 +325,7 @@ export default function App() {
             detail={whoDetail}
             live={live}
             source={
-              kind === "phone" ? "phone" : kind === "voice" ? "microphone" : "rehearsal"
+              kind === "voice" ? "microphone" : "rehearsal"
             }
           />
 
@@ -382,23 +372,6 @@ export default function App() {
                         }}
                       />
                     </>
-                  )}
-                  {kind === "phone" && (
-                    <PhoneCall
-                      onAttached={(id) => {
-                        setSelected(id);
-                        snapshotCustomer(id);
-                      }}
-                      onTurn={(t) => setTurns((p) => [...p, t])}
-                      onAssist={(a) => {
-                        setThinking(null);
-                        setAssists((p) => [...p, a]);
-                      }}
-                      onLedger={(l, f) => {
-                        setLedger(l);
-                        setFrontierUsd(f);
-                      }}
-                    />
                   )}
                 </div>
               </div>
