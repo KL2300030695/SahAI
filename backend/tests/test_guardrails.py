@@ -14,7 +14,11 @@ import pytest
 from app.agents.crm import _coerce_patch_value, _DROP, detect_opt_out
 from app.guardrails import rules
 from app.guardrails.pii import redact, scan
-from app.llm.client import is_probably_hallucination, normalise_currency
+from app.llm.client import (
+    is_probably_hallucination,
+    is_prompt_echo,
+    normalise_currency,
+)
 from app.llm.router import RouteContext, route_nba, mentions_credit_terms
 from app.schemas import ActionType, Citation, Intent, ModelTier, Severity
 
@@ -378,6 +382,59 @@ class TestHallucinationFilter:
 
     def test_short_clip_with_short_plausible_text_is_kept(self):
         assert not is_probably_hallucination("No thanks", 0.5)
+
+
+class TestPromptEcho:
+    """Whisper transcribing our own priming prompt back as customer speech.
+
+    Worse than an ordinary mis-transcription: a fragment of the system's own
+    configuration enters conversation history as something the customer said,
+    and is then fed to the intent classifier on every later turn.
+    """
+
+    def test_the_observed_leak(self):
+        """Seen live in the transcript pane, for a turn where nobody spoke.
+        Paraphrased -- STT_PROMPT says "Spoken numbers like 'one ninety nine'"
+        and Whisper rendered it "the U.S." -- so exact matching cannot catch it."""
+        assert is_prompt_echo("Spoken numbers like the U.S.")
+        assert is_probably_hallucination("Spoken numbers like the U.S.")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Spoken numbers like one ninety nine mean 199",
+            "Indian fintech inside-sales call about PayFlex Pay-in-3",
+            "All money amounts are in Indian rupees",
+        ],
+    )
+    def test_other_prompt_fragments_are_caught(self, text):
+        assert is_prompt_echo(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "My friend told me there is a 199 processing fee",
+            "I am calling you regarding the issue with the AC I bought yesterday",
+            "Sir, can you please clarify some questions based on the presentation?",
+            "Honestly I do not believe the zero cost thing",
+            "What happens if I miss a payment, does interest pile up?",
+            "No I am not interested, please do not call me again",
+            "Can I use this at Croma for a washing machine?",
+            "It asked for Aadhaar and I am not comfortable with that",
+        ],
+    )
+    def test_real_customer_speech_is_never_mistaken_for_an_echo(self, text):
+        """A false positive here silently deletes a real customer turn, which is
+        worse than letting an echo through."""
+        assert not is_prompt_echo(text)
+
+    def test_a_caller_saying_the_amount_is_untouched(self):
+        """'one ninety nine' appears in the prompt, but a caller saying it shares
+        no trigram with it."""
+        assert not is_prompt_echo("It was one ninety nine rupees I think")
+
+    def test_very_short_text_is_left_to_the_filler_filter(self):
+        assert not is_prompt_echo("ok sure")
 
 
 class TestSpeechNormalisation:

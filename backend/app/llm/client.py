@@ -126,6 +126,66 @@ _SOUND_TAG = re.compile(r"^\s*[\[\(♪].*[\]\)♪]\s*$")
 _PUNCT_ONLY = re.compile(r"^[\W_]*$", re.UNICODE)
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text or "").lower()).strip()
+
+
+_PROMPT_NGRAMS: set[str] = set()
+
+
+def _prompt_ngrams(n: int = 3) -> set[str]:
+    """Trigrams of the STT priming prompt, for echo detection."""
+    global _PROMPT_NGRAMS
+    if not _PROMPT_NGRAMS:
+        words = _norm(STT_PROMPT).split()
+        _PROMPT_NGRAMS = {
+            " ".join(words[i : i + n]) for i in range(len(words) - n + 1)
+        }
+    return _PROMPT_NGRAMS
+
+
+def is_prompt_echo(text: str) -> bool:
+    """True when Whisper transcribed our own priming prompt back at us.
+
+    Observed live: the transcript pane showed "Spoken numbers like the U.S." --
+    a fragment of STT_PROMPT ("Spoken numbers like 'one ninety nine' mean 199"),
+    for a turn where nobody had spoken.
+
+    This is the documented cost of prompt priming: given a `prompt` and a
+    low-signal clip, Whisper will happily emit the prompt as its transcription.
+    The priming is still worth keeping -- it is what fixed "$1.99" for "one
+    ninety nine" -- but the echo has to be caught, because a fragment of an
+    instruction entering conversation history is worse than an ordinary
+    mis-transcription: it is text the customer never said, in the voice of the
+    system's own configuration.
+
+    Matched on shared trigrams rather than substring, because the echo is
+    paraphrased -- the observed leak rendered "one ninety nine" as "the U.S.",
+    which defeats any exact match and even 4-grams. A trigram starting the
+    utterance is treated as conclusive on its own: Whisper's echoes begin at a
+    phrase boundary of the prompt, whereas a customer who happens to share three
+    words with it says them mid-sentence.
+
+    Customer speech is not at risk here. The prompt's distinctive sequences
+    ("spoken numbers like", "indian fintech inside") are not things a caller
+    says, and a caller genuinely saying "one ninety nine" shares no trigram with
+    the prompt at all.
+    """
+    words = _norm(text).split()
+    if len(words) < 3:
+        return False
+
+    grams = [" ".join(words[i : i + 3]) for i in range(len(words) - 2)]
+    prompt_grams = _prompt_ngrams()
+
+    # An utterance that *opens* on a prompt phrase is an echo.
+    if grams[0] in prompt_grams:
+        return True
+
+    matched = sum(1 for g in grams if g in prompt_grams)
+    return matched / len(grams) >= 0.20
+
+
 def is_probably_hallucination(text: str, audio_seconds: float = 0.0) -> bool:
     """True when a transcript is almost certainly Whisper filling in silence.
 
@@ -147,6 +207,10 @@ def is_probably_hallucination(text: str, audio_seconds: float = 0.0) -> bool:
     normalised = re.sub(r"[^\w\s']", "", stripped).strip().lower()
     normalised = re.sub(r"\s+", " ", normalised)
     if normalised in _HALLUCINATED_FILLER:
+        return True
+
+    # Whisper echoing our own priming prompt back as speech.
+    if is_prompt_echo(stripped):
         return True
 
     # Whisper cannot produce a real sentence from a fraction of a second; a long
