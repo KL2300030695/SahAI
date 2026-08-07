@@ -63,7 +63,15 @@ export default function App() {
   useEffect(() => {
     api.listCalls().then(setCalls).catch((e) => setError(String(e.message)));
     api.health().then((h) => setMode(h.mode)).catch(() => {});
-    return () => wsRef.current?.close();
+    return () => {
+      // Never close a CONNECTING socket — the browser reports that as an error.
+      const ws = wsRef.current;
+      if (!ws) return;
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+      else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.addEventListener("open", () => ws.close());
+      }
+    };
   }, []);
 
   useEffect(() => {

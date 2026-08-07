@@ -43,14 +43,29 @@ export default function LiveVoice({
 
   // --- socket ---------------------------------------------------------
   useEffect(() => {
+    // `cancelled` guards against React 18 StrictMode, which in development
+    // mounts, unmounts and remounts every effect. Without it the first
+    // socket's teardown handlers write state that belongs to the socket that
+    // replaced it -- which surfaced as a permanent "connection dropped" banner
+    // on a connection that was in fact healthy.
+    let cancelled = false;
+
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws/live/${callId}`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setSttError("Connection to the co-pilot dropped.");
+    ws.onopen = () => {
+      if (cancelled) return;
+      setConnected(true);
+      setSttError(null); // clear anything stale from a previous attempt
+    };
+    ws.onclose = () => {
+      if (!cancelled) setConnected(false);
+    };
+    ws.onerror = () => {
+      if (!cancelled) setSttError("Connection to the co-pilot dropped.");
+    };
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       switch (msg.type) {
@@ -88,12 +103,31 @@ export default function LiveVoice({
           setSttError(msg.message);
           break;
         case "blocked":
-          setSttError(msg.message ?? msg.reason);
+          // Live-call sessions are held in memory, so a backend restart drops
+          // them. That is a real limitation (noted in ARCHITECTURE.md), but it
+          // reads as a mysterious failure unless the message says what to do.
+          setSttError(
+            msg.reason === "consent_not_recorded"
+              ? "This call session no longer exists — the backend restarted. " +
+                "Go back and start a new voice call."
+              : (msg.message ?? msg.reason),
+          );
           break;
       }
     };
 
-    return () => ws.close();
+    return () => {
+      cancelled = true;
+      // Closing a socket that is still CONNECTING makes the browser fire an
+      // `error` event. Under StrictMode that happens on every mount, so
+      // closing naively produced a spurious error banner every single time.
+      // Wait for the handshake, then close.
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      } else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.addEventListener("open", () => ws.close());
+      }
+    };
     // callId is the identity of this session; re-running on callbacks would
     // tear down a live socket mid-call.
     // eslint-disable-next-line react-hooks/exhaustive-deps

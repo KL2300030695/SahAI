@@ -111,7 +111,19 @@ export default function PhoneCall({
     ws.onclose = () => setStatus((s) => s || "disconnected");
   }
 
-  useEffect(() => () => wsRef.current?.close(), []);
+  useEffect(
+    () => () => {
+      // Same StrictMode hazard as LiveVoice: closing a CONNECTING socket makes
+      // the browser fire an error event. Wait for the handshake first.
+      const ws = wsRef.current;
+      if (!ws) return;
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+      else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.addEventListener("open", () => ws.close());
+      }
+    },
+    [],
+  );
 
   return (
     <div className="panel border-indigo-900/50">
