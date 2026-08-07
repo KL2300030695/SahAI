@@ -27,6 +27,8 @@ from fastapi import (
     Depends,
     FastAPI,
     HTTPException,
+    Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -60,6 +62,13 @@ from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
 from app.schemas import Intent, ModelTier, Speaker, TranscriptTurn
 from app.telemetry.cost import CostMeter
+from app.telephony.audio import UtteranceBuffer
+from app.telephony.twilio import (
+    TRACK_TO_SPEAKER,
+    build_twiml,
+    parse_message,
+    verify_signature,
+)
 
 TRANSCRIPTS = BACKEND_DIR / "app" / "seed" / "transcripts"
 UPLOADS = BACKEND_DIR / "uploads"
@@ -106,6 +115,22 @@ class LiveCall:
         self.meter = CostMeter(call_id)
         self.assists: list[dict[str, Any]] = []
         self.finalised: Optional[dict[str, Any]] = None
+
+        # Phone calls are driven by the carrier's socket, not by the agent's
+        # browser, so the dashboard has to observe rather than drive. Each
+        # observer gets its own queue; a slow or dead observer is dropped rather
+        # than allowed to block the call.
+        self.subscribers: list[asyncio.Queue] = []
+        self.source: str = "browser"  # browser | phone | scripted
+        self.phone_number: str = ""
+        self.ended: bool = False
+
+    def publish(self, message: dict[str, Any]) -> None:
+        for q in list(self.subscribers):
+            try:
+                q.put_nowait(message)
+            except asyncio.QueueFull:
+                self.subscribers.remove(q)
 
 
 LIVE: dict[str, LiveCall] = {}
@@ -612,6 +637,336 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
                 record_cost(s, row)
         try:
             await ws.send_json({"type": "call_ended", "call_id": call_id})
+            await ws.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Telephony — real phone calls
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/telephony/config")
+def telephony_config() -> dict:
+    """What a carrier needs pointing at, and whether we are ready to receive."""
+    ready = bool(settings.public_base_url)
+    return {
+        "ready": ready,
+        "voice_webhook": (
+            f"{settings.public_base_url.rstrip('/')}/api/telephony/voice"
+            if ready
+            else None
+        ),
+        "stream_url": settings.stream_wss_url or None,
+        "signature_verification": bool(settings.twilio_auth_token),
+        "default_customer_id": settings.default_customer_id,
+        "hint": (
+            "Set PUBLIC_BASE_URL to an https tunnel (ngrok/cloudflared) and point "
+            "your Twilio number's Voice webhook at /api/telephony/voice."
+            if not ready
+            else "Point your Twilio number's Voice webhook at the URL above."
+        ),
+    }
+
+
+@app.get("/api/telephony/active")
+def telephony_active() -> list[dict]:
+    """Phone calls currently in progress, for the dashboard to attach to."""
+    return [
+        {
+            "call_id": c.call_id,
+            "customer_id": c.customer_id,
+            "phone_number": c.phone_number,
+            "source": c.source,
+            "turns": len(c.history),
+            "ended": c.ended,
+        }
+        for c in LIVE.values()
+        if c.source == "phone" and not c.ended
+    ]
+
+
+@app.post("/api/telephony/voice")
+async def telephony_voice(request: Request) -> Response:
+    """TwiML webhook — the carrier fetches this when a call connects.
+
+    Creates the session, records consent, and returns instructions telling the
+    carrier to speak the disclosure and then fork call audio to our socket.
+
+    The disclosure lives in the TwiML rather than in an agent's script on
+    purpose: it is spoken by the platform before a single audio frame is
+    streamed, so it cannot be skipped. Same property as the dashboard's consent
+    gate, enforced one layer earlier.
+    """
+    form = dict((await request.form()))  # type: ignore[arg-type]
+    params = {k: str(v) for k, v in form.items()}
+
+    if settings.twilio_auth_token:
+        url = str(request.url)
+        signature = request.headers.get("X-Twilio-Signature", "")
+        if not verify_signature(settings.twilio_auth_token, url, params, signature):
+            raise HTTPException(403, "invalid Twilio signature")
+
+    customer_id = (
+        request.query_params.get("customer_id") or settings.default_customer_id
+    )
+    with session_scope() as s:
+        if not s.get(Customer, customer_id):
+            raise HTTPException(404, f"unknown customer {customer_id!r}")
+
+    call_id = f"tel-{uuid.uuid4().hex[:8]}"
+    live = LiveCall(call_id=call_id, customer_id=customer_id, agent_name="Phone agent")
+    live.consent_ack = True
+    live.consent_at = datetime.now(timezone.utc)
+    live.source = "phone"
+    live.phone_number = params.get("From", "")
+    LIVE[call_id] = live
+
+    with session_scope() as s:
+        s.add(
+            Call(
+                call_id=call_id,
+                customer_id=customer_id,
+                agent_name="Phone agent",
+                consent_ack=True,
+                consent_at=live.consent_at,
+            )
+        )
+
+    stream_url = settings.stream_wss_url
+    if not stream_url:
+        raise HTTPException(
+            500,
+            "PUBLIC_BASE_URL is not set, so there is no reachable stream URL for "
+            "the carrier to connect back to.",
+        )
+
+    twiml = build_twiml(
+        stream_url,
+        call_id=call_id,
+        greeting=(
+            "Thanks for calling PayFlex. Before we begin, please note this call "
+            "may be recorded and is A I assisted, to help us give you accurate "
+            "information. Connecting you now."
+        ),
+    )
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.websocket("/ws/telephony/stream")
+async def ws_telephony(ws: WebSocket) -> None:
+    """Twilio Media Streams socket — carrier audio in, assists out to observers.
+
+    Each party's audio arrives on a separate labelled track, so speaker
+    attribution is exact here rather than declared by the user. That is the one
+    thing a phone call gives us that a single laptop microphone cannot.
+    """
+    await ws.accept()
+
+    orch = get_orchestrator()
+    llm = get_llm()
+    live: Optional[LiveCall] = None
+    crm = None
+    # One buffer per leg: the customer and the agent talk over each other, and
+    # mixing their frames into a single buffer would produce garbage.
+    buffers: dict[str, UtteranceBuffer] = {
+        "inbound": UtteranceBuffer(),
+        "outbound": UtteranceBuffer(),
+    }
+
+    # Utterances must be handled in the order they closed. Transcription latency
+    # varies by clip, so firing tasks concurrently delivered a scrambled
+    # transcript in testing -- "My friend told me..." arrived before "Honestly I
+    # don't believe...". Order is not cosmetic here: conversation history is fed
+    # to the intent classifier on every turn and to the summariser at the end.
+    #
+    # A lock rather than unbounded concurrency. Utterances are naturally spaced
+    # by the speaker pausing, so the queueing cost is small next to producing a
+    # transcript that reads backwards.
+    order_lock = asyncio.Lock()
+
+    async def process(wav: bytes, speaker: Speaker) -> None:
+        nonlocal live, crm
+        if live is None:
+            return
+        async with order_lock:
+            await _process_locked(wav, speaker)
+
+    async def _process_locked(wav: bytes, speaker: Speaker) -> None:
+        nonlocal live, crm
+        if live is None:
+            return
+        try:
+            text, seconds = await asyncio.to_thread(
+                llm.transcribe_bytes, wav, "call.wav"
+            )
+        except Exception as e:  # noqa: BLE001
+            live.publish({"type": "stt_error", "message": str(e)[:300]})
+            return
+
+        live.meter.record_stt(
+            "whisper",
+            settings.model_stt,
+            price_audio_seconds(settings.model_stt, seconds),
+            0.0,
+        )
+        if is_probably_hallucination(text, seconds):
+            return
+
+        turn = TranscriptTurn(
+            index=len(live.history), speaker=speaker, text=text, ts=float(len(live.history))
+        )
+        from app.guardrails.pii import redact
+
+        red = redact(text)
+        live.publish(
+            {
+                "type": "transcript",
+                "turn": {
+                    "index": turn.index,
+                    "speaker": speaker.value,
+                    "text": red.text,
+                    "ts": turn.ts,
+                },
+                "pii_redacted": red.found,
+                "seconds": seconds,
+            }
+        )
+
+        if speaker != Speaker.CUSTOMER:
+            live.history.append(turn)
+            return
+
+        live.publish({"type": "thinking", "turn_index": turn.index})
+        assist = await asyncio.to_thread(
+            orch.handle_turn,
+            call_id=live.call_id,
+            turn=turn,
+            history=list(live.history),
+            meter=live.meter,
+            consent_ack=live.consent_ack,
+            crm=crm,
+        )
+        live.history.append(turn)
+        if assist.intent:
+            live.intents_seen.append(assist.intent.intent)
+            live.max_dropoff_risk = max(live.max_dropoff_risk, assist.intent.dropoff_risk)
+
+        payload = json.loads(assist.model_dump_json())
+        live.assists.append(payload)
+        live.publish({"type": "assist", "assist": payload})
+        live.publish(
+            {
+                "type": "ledger",
+                "ledger": json.loads(live.meter.ledger().model_dump_json()),
+                "frontier_usd": live.meter.frontier_baseline_usd(),
+            }
+        )
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                event = parse_message(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+
+            if event.kind == "start":
+                live = LIVE.get(event.call_id)
+                if live is None:
+                    await ws.close()
+                    return
+                with session_scope() as s:
+                    crm = get_crm_snapshot(s, live.customer_id)
+                live.publish(
+                    {
+                        "type": "phone_connected",
+                        "call_id": live.call_id,
+                        "from": live.phone_number,
+                    }
+                )
+
+            elif event.kind == "media" and live is not None:
+                buf = buffers.setdefault(event.track, UtteranceBuffer())
+                wav = buf.add(event.payload)
+                if wav:
+                    # Fire and forget: transcription takes far longer than the
+                    # 20ms frame cadence, so awaiting it here would stall the
+                    # socket and drop the caller's audio.
+                    asyncio.create_task(process(wav, event.speaker))
+
+            elif event.kind == "stop":
+                break
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if live is not None:
+            for track, buf in buffers.items():
+                tail = buf.flush()
+                if tail:
+                    await process(tail, TRACK_TO_SPEAKER.get(track, Speaker.CUSTOMER))
+            live.ended = True
+            live.publish({"type": "call_ended", "call_id": live.call_id})
+            with session_scope() as s:
+                for row in live.meter.rows:
+                    record_cost(s, row)
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/observe/{call_id}")
+async def ws_observe(ws: WebSocket, call_id: str) -> None:
+    """Read-only view of a call driven by someone else.
+
+    The agent's dashboard uses this for phone calls: the carrier's socket drives
+    the pipeline, and the browser watches. Sends the backlog first so a dashboard
+    attaching mid-call is not missing the turns that already happened.
+    """
+    await ws.accept()
+    live = LIVE.get(call_id)
+    if live is None:
+        await ws.send_json({"type": "error", "message": f"unknown call {call_id}"})
+        await ws.close()
+        return
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+    live.subscribers.append(queue)
+    try:
+        await ws.send_json(
+            {
+                "type": "attached",
+                "call_id": call_id,
+                "source": live.source,
+                "from": live.phone_number,
+                "backlog": len(live.assists),
+            }
+        )
+        for a in live.assists:
+            await ws.send_json({"type": "assist", "assist": a})
+        if live.meter.rows:
+            await ws.send_json(
+                {
+                    "type": "ledger",
+                    "ledger": json.loads(live.meter.ledger().model_dump_json()),
+                    "frontier_usd": live.meter.frontier_baseline_usd(),
+                }
+            )
+
+        while True:
+            msg = await queue.get()
+            await ws.send_json(msg)
+            if msg.get("type") == "call_ended":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if queue in live.subscribers:
+            live.subscribers.remove(queue)
+        try:
             await ws.close()
         except Exception:
             pass

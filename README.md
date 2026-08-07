@@ -125,14 +125,67 @@ cost claims are inspectable rather than asserted.
 
 ## Voice
 
-Three input paths, all running the identical pipeline and the identical consent
+Four input paths, all running the identical pipeline and the identical consent
 gate:
 
 | Path | How |
 |---|---|
-| **Live microphone** | Browser captures audio, segments it on ~900ms of silence, streams each complete utterance over `/ws/live/{id}`. Whisper transcribes; the co-pilot assists in real time. |
-| **Audio upload** | Drop a recorded clip into `POST /api/live/{id}/audio-turn` — transcribed and run through the full pipeline. Fallback when a mic isn't available. |
+| **Real phone call** | Twilio forks call audio to `/ws/telephony/stream` as G.711 mu-law. Each party arrives on a separate track, so speaker attribution is exact. See below. |
+| **Live microphone** | Browser captures audio, segments it on ~900ms of silence, streams each complete utterance over `/ws/live/{id}`. |
+| **Audio upload** | Drop a recorded clip into `POST /api/live/{id}/audio-turn`. Fallback when a mic isn't available. |
 | **Scripted playback** | Replays a seeded transcript. Deterministic, no dependencies — the safe demo path. |
+
+### Phone calls
+
+Try it with no Twilio account, no phone number and no tunnel:
+
+```bash
+cd backend
+python simulate_phone_call.py           # replays a clip as a real inbound call
+```
+
+The simulator converts a WAV to mu-law, chops it into 20ms frames, and speaks
+Twilio's Media Streams protocol to the real endpoint. Everything downstream is
+the production path — same codec handling, same server-side VAD, same Whisper
+call, same orchestrator, same guardrails. Only the frame source differs.
+
+**To take an actual call:**
+
+1. Expose the backend — carriers need a public https URL:
+   ```bash
+   ngrok http 8000
+   ```
+2. Put it in `.env` and restart:
+   ```
+   PUBLIC_BASE_URL=https://your-subdomain.ngrok-free.app
+   TWILIO_AUTH_TOKEN=your_token      # enables signature verification
+   ```
+3. In the Twilio console, set your number's **Voice → A call comes in** webhook to:
+   ```
+   https://your-subdomain.ngrok-free.app/api/telephony/voice
+   ```
+4. Open the dashboard, choose **Phone call**, and ring the number.
+
+`GET /api/telephony/config` reports exactly what to paste and whether the server
+is ready.
+
+**Two design points worth knowing:**
+
+The TwiML uses `<Start><Stream>`, not `<Connect><Stream>`. `<Connect>` hands the
+call *to* the socket and expects audio back — that is how you build a bot. This
+is a co-pilot: it forks a copy of the audio while the call proceeds normally
+between the customer and the human agent, and it never speaks to the customer.
+
+The consent disclosure is a `<Say>` verb *before* the stream starts, so it is
+spoken by the platform before a single audio frame is forked. Same property as
+the dashboard's consent gate, enforced one layer earlier — an agent under time
+pressure cannot skip it.
+
+> **Indian numbers via Twilio require regulatory documentation** (business
+> address proof, and a bundle approval that takes days). For a demo, a US trial
+> number works fine and calls it from anywhere; the simulator needs nothing at
+> all. Plivo and Exotel expose near-identical stream shapes if you need an
+> Indian provider — the parsing is confined to `app/telephony/twilio.py`.
 
 Suggestions can also be **read aloud** to the agent via browser speech
 synthesis (free, no added latency, no provider).
@@ -180,6 +233,11 @@ quoted back to the customer**, because grounding won't match it.
 | `WS` | `/ws/call/{id}` | Scripted agent-assist stream |
 | `WS` | `/ws/live/{id}` | **Live microphone** — binary audio in, assist out |
 | `POST` | `/api/live/{id}/audio-turn` | Upload a clip → STT → full pipeline |
+| `GET` | `/api/telephony/config` | What to paste into the carrier console |
+| `POST` | `/api/telephony/voice` | **TwiML webhook** — the carrier fetches this on an inbound call |
+| `WS` | `/ws/telephony/stream` | **Carrier audio** — Twilio Media Streams |
+| `GET` | `/api/telephony/active` | Phone calls currently in progress |
+| `WS` | `/ws/observe/{id}` | Read-only view of a call driven by the carrier |
 | `POST` | `/api/calls/{id}/finalise` | Summary, CRM patch, follow-up draft |
 | `POST` | `/api/calls/{id}/approve` | **The human gate.** Requires `approver_id`. |
 | `GET` | `/api/calls/{id}/ledger` | Per-decision cost ledger |

@@ -310,7 +310,68 @@ bad one reaching a human.
 
 ---
 
-## 10. Repository map
+## 10. Telephony
+
+```
+customer's phone ──► carrier ──► TwiML webhook ──► session + consent on record
+                                                          │
+                          <Say> disclosure, then <Start><Stream both_tracks>
+                                                          │
+                        wss /ws/telephony/stream ── base64 G.711 mu-law, 20ms
+                                                          │
+                          per-leg buffers: inbound=customer, outbound=agent
+                                                          │
+                                 server VAD ──► mu-law → PCM16 → WAV
+                                                          │
+                                                       Whisper
+                                                          │
+                                       ── the same orchestrator ──
+                                                          │
+                       publish ──► ws /ws/observe/{id} ──► agent dashboard
+```
+
+**Speaker attribution is exact here.** The carrier keeps the two call legs
+separate and labels every frame `inbound` or `outbound`, so the system knows who
+spoke without asking. This is the one thing a phone call gives that a single
+laptop microphone cannot — the browser path has to expose a manual toggle
+because one mic cannot separate voices and Whisper does not diarise.
+
+**The dashboard observes rather than drives.** A phone call is driven by the
+carrier's socket, so the browser is not in the audio path at all — which is what
+makes it work when the agent is on a desk phone or a softphone. `/ws/observe`
+replays the backlog on attach, so a dashboard opened mid-call is not missing the
+turns that already happened.
+
+**`<Start>` not `<Connect>`.** `<Connect><Stream>` hands the call to the socket
+and expects audio back; that is a voice bot. `<Start><Stream>` forks a copy while
+the call proceeds normally between the two humans. A co-pilot advises the agent
+and never speaks to the customer, and the choice of TwiML verb is what enforces
+that at the platform level.
+
+**Codec handling is pure Python.** `audioop` is the obvious route and is
+**removed in Python 3.13**, so depending on it would break the project on a newer
+interpreter; numpy would be a heavy dependency for a 256-entry lookup table and
+an RMS loop. `app/telephony/audio.py` has no third-party dependency.
+
+### Two ordering bugs found by running it
+
+**Sentence pauses fragmenting one question.** At a 700ms silence threshold, "I
+don't believe the zero-cost thing. My friend said there's a fee. Is that true?"
+arrived as three turns — three transcriptions, three pipeline runs, three
+suggestions, only the last of which answered the question. Raised to 900ms to
+match the browser VAD.
+
+**Concurrent transcription scrambling the transcript.** Utterances were
+transcribed as fire-and-forget tasks, and because latency varies by clip they
+completed out of order: "My friend told me…" landed *before* "Honestly I don't
+believe…". Not cosmetic — conversation history feeds the intent classifier on
+every turn and the summariser at the end. Now serialised behind a per-call lock;
+utterances are naturally spaced by the speaker pausing, so the queueing cost is
+small next to a transcript that reads backwards.
+
+---
+
+## 11. Repository map
 
 ```
 backend/app/
@@ -330,5 +391,10 @@ backend/app/
 │  └─ rules.py       the five deterministic checks
 ├─ crm/              SQLAlchemy models + the approval write path
 ├─ telemetry/cost.py per-decision ledger
-└─ seed/             18 KB docs · 4 transcripts · CRM seeder
+├─ telephony/
+│  ├─ audio.py       G.711 mu-law codec, WAV packaging, server-side VAD
+│  └─ twilio.py      TwiML generation, Media Streams parsing, signature check
+└─ seed/             18 KB docs · 4 transcripts · audio clips · CRM seeder
+
+backend/simulate_phone_call.py   replays a WAV as a real inbound call
 ```

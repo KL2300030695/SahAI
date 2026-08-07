@@ -13,6 +13,7 @@ import CostMeter from "./components/CostMeter";
 import PostCallReview from "./components/PostCallReview";
 import LiveVoice from "./components/LiveVoice";
 import AudioUpload from "./components/AudioUpload";
+import PhoneCall from "./components/PhoneCall";
 import { Empty, Spinner } from "./components/Bits";
 
 type Phase =
@@ -23,7 +24,8 @@ type Phase =
   | "ended"
   | "review"
   | "voice_setup"
-  | "voice_live";
+  | "voice_live"
+  | "phone";
 
 interface CustomerRow {
   customer_id: string;
@@ -239,7 +241,7 @@ export default function App() {
               Both paths run the identical pipeline — same agents, same
               guardrails, same consent gate.
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <button
                 onClick={() => setPhase("select")}
                 className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-sky-800 hover:bg-slate-900"
@@ -274,6 +276,28 @@ export default function App() {
                 <p className="text-[11px] leading-snug text-slate-500">
                   Speak into the microphone. Whisper transcribes each utterance
                   and the co-pilot assists in real time. Audio upload too.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setTurns([]);
+                  setAssists([]);
+                  setLedger(null);
+                  setPost(null);
+                  setError(null);
+                  setPhase("phone");
+                }}
+                className="rounded-lg border border-indigo-900/60 bg-slate-900/60 p-4 text-left transition hover:border-indigo-700 hover:bg-slate-900"
+              >
+                <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-100">
+                  Phone call
+                  <span className="chip bg-indigo-500/10 text-indigo-300 ring-indigo-500/30">
+                    twilio
+                  </span>
+                </div>
+                <p className="text-[11px] leading-snug text-slate-500">
+                  A real inbound call. The carrier sends each party on its own
+                  track, so speaker attribution is exact rather than guessed.
                 </p>
               </button>
             </div>
@@ -437,7 +461,8 @@ export default function App() {
       {(phase === "live" ||
         phase === "ended" ||
         phase === "review" ||
-        phase === "voice_live") && (
+        phase === "voice_live" ||
+        phase === "phone") && (
         <div className="grid flex-1 grid-cols-12 gap-3 overflow-hidden p-3">
           {/* transcript */}
           <div className="col-span-4 flex flex-col overflow-hidden">
@@ -485,21 +510,24 @@ export default function App() {
                 {!turns.length && <Empty>Waiting for the first turn…</Empty>}
               </div>
 
-              {(phase === "ended" || phase === "voice_live") && !post && (
-                <div className="border-t border-slate-800 p-3">
-                  <button
-                    onClick={finalise}
-                    disabled={busy || (phase === "voice_live" && !turns.length)}
-                    className="w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-40"
-                  >
-                    {busy
-                      ? "Summarising…"
-                      : phase === "voice_live"
-                        ? "End call — generate CRM update"
-                        : "Call ended — generate CRM update"}
-                  </button>
-                </div>
-              )}
+              {(phase === "ended" ||
+                phase === "voice_live" ||
+                phase === "phone") &&
+                !post && (
+                  <div className="border-t border-slate-800 p-3">
+                    <button
+                      onClick={finalise}
+                      disabled={busy || !turns.length || !selected}
+                      className="w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-40"
+                    >
+                      {busy
+                        ? "Summarising…"
+                        : phase === "ended"
+                          ? "Call ended — generate CRM update"
+                          : "End call — generate CRM update"}
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
 
@@ -521,6 +549,23 @@ export default function App() {
 
           {/* voice controls + cost */}
           <div className="col-span-3 space-y-3 overflow-y-auto pr-1">
+            {phase === "phone" && (
+              <PhoneCall
+                onAttached={(id) => {
+                  setSelected(id);
+                  setLiveCallId(id);
+                }}
+                onTurn={(t) => setTurns((prev) => [...prev, t])}
+                onAssist={(a) => {
+                  setThinking(null);
+                  setAssists((prev) => [...prev, a]);
+                }}
+                onLedger={(l, f) => {
+                  setLedger(l);
+                  setFrontierUsd(f);
+                }}
+              />
+            )}
             {phase === "voice_live" && liveCallId && (
               <>
                 <LiveVoice
