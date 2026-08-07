@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from app.integrations import firestore_sync, sheets
+from app import security
 
 
 @pytest.fixture(autouse=True)
@@ -33,4 +34,22 @@ def _no_external_writes(monkeypatch):
     """
     monkeypatch.setattr(firestore_sync, "enabled", lambda: False, raising=True)
     monkeypatch.setattr(sheets, "enabled", lambda: False, raising=True)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _auth_off_by_default(monkeypatch):
+    """Run the suite unauthenticated unless a test says otherwise.
+
+    Same reasoning as the mirrors above: a test must behave identically on a
+    laptop with real credentials in .env and on CI with none. Turning auth on
+    locally broke six tests that had nothing to do with auth, which is the
+    signal that they were reading ambient configuration rather than pinning
+    behaviour.
+
+    Tests that *are* about access control turn it back on explicitly — see
+    `tests/test_auth.py`.
+    """
+    monkeypatch.setattr(security, "auth_enabled", lambda: False)
+    monkeypatch.setattr(security, "_registry", dict)
     yield

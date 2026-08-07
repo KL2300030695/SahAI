@@ -12,14 +12,54 @@ import type { CallDetail, CallSummary, PostCallResult } from "./types";
  * (a URL is likelier to be logged by a proxy), which is why it is the exception
  * rather than the rule.
  */
-const API_KEY: string = (import.meta as any).env?.VITE_API_KEY ?? "";
+const KEY_STORAGE = "sahai.apiKey";
 
-export function authHeaders(): Record<string, string> {
-  return API_KEY ? { "X-API-Key": API_KEY } : {};
+/**
+ * The credential is held in localStorage, not in memory.
+ *
+ * The alternative — keeping it in a React state only — logs the agent out on
+ * every refresh, and this dashboard gets refreshed a lot mid-development. The
+ * tradeoff is honest and worth stating: localStorage is readable by any script
+ * running on the page, so an XSS bug becomes a credential leak. That is
+ * acceptable for an API key scoped to one internal tool and rotated by an
+ * admin; it would not be for a bearer token that reached a payment system.
+ *
+ * VITE_API_KEY still works and takes precedence, so a deployment can bake in a
+ * credential without anyone signing in.
+ */
+export function getApiKey(): string {
+  const baked = (import.meta as any).env?.VITE_API_KEY;
+  if (baked) return String(baked);
+  try {
+    return localStorage.getItem(KEY_STORAGE) ?? "";
+  } catch {
+    return ""; // private browsing, or storage disabled
+  }
 }
 
+export function setApiKey(key: string): void {
+  try {
+    if (key) localStorage.setItem(KEY_STORAGE, key);
+    else localStorage.removeItem(KEY_STORAGE);
+  } catch {
+    /* nothing we can do; the session simply will not persist */
+  }
+}
+
+export function authHeaders(): Record<string, string> {
+  const k = getApiKey();
+  return k ? { "X-API-Key": k } : {};
+}
+
+/**
+ * A browser cannot set headers on a WebSocket handshake, so socket URLs carry
+ * the key as a query parameter. That is a real difference in exposure — a URL
+ * is likelier to be logged by a proxy than a header — which is why it is the
+ * exception rather than the rule.
+ */
 export function withKey(url: string): string {
-  return API_KEY ? `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(API_KEY)}` : url;
+  const k = getApiKey();
+  return k ? `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(k)}` : url;
 }
 
 /**

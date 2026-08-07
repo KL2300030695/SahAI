@@ -34,11 +34,23 @@ from app.export import (  # noqa: E402
 from app.main import app  # noqa: E402
 
 CALL_ID = sys.argv[1] if len(sys.argv) > 1 else "call-001"
+
+#: With AUTH_ENABLED=1 the write endpoints require a credential. Taken from the
+#: environment rather than hard-coded so this script never carries a key, and
+#: falls back to the first configured one so a demo run needs no extra setup.
+def _key() -> dict:
+    from app.config import get_settings
+
+    explicit = os.environ.get("SAHAI_API_KEY")
+    if explicit:
+        return {"X-API-Key": explicit}
+    first = (get_settings().api_keys or "").split(",")[0].split(":")[0].strip()
+    return {"X-API-Key": first} if first else {}
 OUT = "exports"
 
 
 def main() -> None:
-    client = TestClient(app)
+    client = TestClient(app, headers=_key())
 
     print(f"=== {CALL_ID} ===\n")
     r = client.post(

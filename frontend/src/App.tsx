@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, openCallSocket } from "./lib/api";
+import { api, openCallSocket, setApiKey } from "./lib/api";
 import { voice } from "./lib/speech";
 import type {
   CallDetail,
@@ -22,6 +22,7 @@ import IdleState from "./components/IdleState";
 import LiveVoice from "./components/LiveVoice";
 import AudioUpload from "./components/AudioUpload";
 import CustomerRecord from "./components/CustomerRecord";
+import SignIn from "./components/SignIn";
 
 /**
  * Layout is horizontal bands, not columns.
@@ -72,11 +73,34 @@ export default function App() {
   const activeCustomerId =
     detail?.customer_id ?? (kind === "voice" ? voiceCustomer : null);
 
+  /**
+   * Who we are, resolved from the credential on boot.
+   *
+   * `null` means "not asked yet" and must not be confused with "not signed in",
+   * or the sign-in screen flashes for a moment on every load for a user who is
+   * already authenticated.
+   */
+  const [me, setMe] = useState<{
+    name: string;
+    role: string;
+    authenticated: boolean;
+    auth_enabled: boolean;
+  } | null>(null);
+  const [identityChecked, setIdentityChecked] = useState(false);
+
+  const loadIdentity = () =>
+    api
+      .me()
+      .then(setMe)
+      .catch(() => setMe(null))
+      .finally(() => setIdentityChecked(true));
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    loadIdentity();
     api.listCalls().then(setCalls).catch((e) => setError(String(e.message)));
     api.health().then((h) => setMode(h.mode)).catch(() => {});
     api.customers().then((c) => {
@@ -232,6 +256,20 @@ export default function App() {
       ? `${detail.crm.city} · KYC ${detail.crm.kyc_status.replace(/_/g, " ")}`
       : customers.find((c) => c.customer_id === voiceCustomer)?.city;
 
+  // Wait for the identity check before rendering anything, so an authenticated
+  // reload does not flash the sign-in screen.
+  if (!identityChecked) return <div className="flex h-full flex-col" />;
+
+  // Only gate when the server enforces auth. A fresh clone with AUTH_ENABLED=0
+  // must still open straight into a working dashboard.
+  if (me?.auth_enabled && !me.authenticated) {
+    return (
+      <div className="flex h-full flex-col">
+        <SignIn onSignedIn={loadIdentity} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       {/* ---------- masthead ---------- */}
@@ -247,18 +285,42 @@ export default function App() {
             Co-pilot for Pay-in-3 calls
           </span>
         </div>
-        {phase !== "idle" && (
-          <button
-            onClick={() => {
-              reset();
-              setPhase("idle");
-            }}
-            className="text-[12px] underline"
-            style={{ color: "var(--graphite)" }}
-          >
-            end and start over
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {phase !== "idle" && (
+            <button
+              onClick={() => {
+                reset();
+                setPhase("idle");
+              }}
+              className="text-[12px] underline"
+              style={{ color: "var(--graphite)" }}
+            >
+              end and start over
+            </button>
+          )}
+          {me && (
+            <span className="flex items-center gap-2 text-[12px]">
+              <span style={{ color: "var(--graphite)" }}>{me.name}</span>
+              <span className={`tag ${me.authenticated ? "tag-verified" : "tag-yourcall"}`}>
+                {me.authenticated ? me.role : "unauthenticated"}
+              </span>
+              {me.authenticated && (
+                <button
+                  onClick={() => {
+                    setApiKey("");
+                    reset();
+                    setPhase("idle");
+                    loadIdentity();
+                  }}
+                  className="text-[12px] underline"
+                  style={{ color: "var(--graphite)" }}
+                >
+                  sign out
+                </button>
+              )}
+            </span>
+          )}
+        </div>
       </header>
 
       {error && (

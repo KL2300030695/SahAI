@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import (
+    Header,
     Depends,
     FastAPI,
     HTTPException,
@@ -72,7 +73,13 @@ from app.export import (
 )
 from app.guardrails import rules
 from app.integrations import firestore_sync, sheets
-from app.security import Principal, auth_enabled, get_principal, requires
+from app.security import (
+    Principal,
+    auth_enabled,
+    get_principal,
+    principal_for,
+    requires,
+)
 from app.schemas import (
     CheckName,
     CheckResult,
@@ -1248,7 +1255,7 @@ def integrations_sync(call_id: Optional[str] = None,
 
 
 @app.get("/api/me")
-def whoami(principal: Principal = Depends(get_principal)) -> dict:
+def whoami(x_api_key: Optional[str] = Header(None)) -> dict:
     """Who the caller is, and what they may do.
 
     The dashboard reads this to decide whether to ask an agent to type their
@@ -1256,6 +1263,14 @@ def whoami(principal: Principal = Depends(get_principal)) -> dict:
     that asks for a name it is going to ignore teaches the wrong thing about
     where the authority comes from.
     """
+    # Deliberately not behind `get_principal`. This is the endpoint the
+    # dashboard calls to find out whether to show a sign-in screen, so 401-ing
+    # an anonymous caller makes it impossible to distinguish "no credential"
+    # from "server unreachable" — and the dashboard then renders itself as if
+    # signed in. Reporting "you are nobody" is the answer, not an error.
+    principal = principal_for(x_api_key) or Principal(
+        key_id="-", name="Not signed in", role="viewer", authenticated=False
+    )
     return {
         "name": principal.name,
         "role": principal.role,
