@@ -12,6 +12,12 @@ own. Both of those are enforced in code, not asked for in a prompt.
 
 ---
 
+> **Presenting or reviewing this?** Read
+> **[`docs/SahAI-Project-Brief.pdf`](docs/SahAI-Project-Brief.pdf)** — a 12-page
+> brief covering how the whole system works, every measured number, the known
+> limits, the bugs we found, and an 8-minute demo script. It is written to be
+> read cold by someone who has never seen the code.
+
 ## Table of contents
 
 - [What it does](#what-it-does)

@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SahAI — Complete Project Brief</title>
+<style>
+  @page { size: A4; }
+
+  :root{
+    --ink:#161b22; --graphite:#5b6570; --hair:#e3e6e8; --paper:#f5f6f7;
+    --verified:#0f7b6c; --verified-wash:#e6f2f0;
+    --yourcall:#b45309; --yourcall-wash:#fdf3e7;
+    --halt:#b42318; --halt-wash:#fdeceb;
+    --ui:"Segoe UI",-apple-system,system-ui,sans-serif;
+    --mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+    --serif:"Georgia","Times New Roman",serif;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    font-family:var(--ui); color:var(--ink); line-height:1.55;
+    font-size:10.5pt; margin:0;
+  }
+
+  h1{font-family:var(--serif);font-size:26pt;line-height:1.15;margin:0 0 6px;letter-spacing:-.01em}
+  h2{
+    font-size:14pt;margin:26px 0 10px;padding-bottom:5px;
+    border-bottom:2px solid var(--ink); page-break-after:avoid;
+  }
+  h3{font-size:11.5pt;margin:18px 0 6px;page-break-after:avoid}
+  h4{font-size:10pt;margin:14px 0 4px;color:var(--graphite);
+     text-transform:uppercase;letter-spacing:.06em;page-break-after:avoid}
+  p{margin:0 0 9px}
+  ul,ol{margin:0 0 9px;padding-left:19px}
+  li{margin-bottom:3px}
+  code{font-family:var(--mono);font-size:9pt;background:var(--paper);padding:1px 4px;border-radius:3px}
+  pre{
+    font-family:var(--mono);font-size:8.4pt;line-height:1.45;background:var(--paper);
+    border:1px solid var(--hair);border-left:3px solid var(--graphite);
+    padding:9px 11px;border-radius:4px;overflow-x:auto;
+    white-space:pre-wrap;word-break:break-word;page-break-inside:avoid;margin:0 0 10px;
+  }
+  pre.tight{font-size:7.6pt;line-height:1.35}
+
+  table{border-collapse:collapse;width:100%;font-size:9.2pt;margin:0 0 12px;page-break-inside:avoid}
+  th{background:var(--ink);color:#fff;text-align:left;padding:5px 7px;font-weight:600}
+  td{padding:4.5px 7px;border-bottom:1px solid var(--hair);vertical-align:top}
+  tr:nth-child(even) td{background:#fafbfb}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-size:8.6pt}
+
+  .lede{font-size:11.5pt;color:var(--graphite);margin-bottom:14px}
+  .rule{height:3px;background:var(--ink);margin:0 0 16px}
+
+  .box{border:1px solid var(--hair);border-left:3px solid var(--graphite);
+       padding:9px 12px;border-radius:4px;margin:0 0 12px;page-break-inside:avoid}
+  .box.good{border-left-color:var(--verified);background:var(--verified-wash)}
+  .box.warn{border-left-color:var(--yourcall);background:var(--yourcall-wash)}
+  .box.stop{border-left-color:var(--halt);background:var(--halt-wash)}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700;display:block;margin-bottom:2px}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tag{display:inline-block;font-size:7.6pt;font-weight:600;letter-spacing:.04em;
+       text-transform:uppercase;padding:1.5px 6px;border-radius:99px;
+       background:var(--paper);border:1px solid var(--hair);color:var(--graphite)}
+  .tag.ok{background:var(--verified-wash);border-color:var(--verified);color:var(--verified)}
+  .tag.no{background:var(--halt-wash);border-color:var(--halt);color:var(--halt)}
+  .tag.mid{background:var(--yourcall-wash);border-color:var(--yourcall);color:var(--yourcall)}
+
+  .page-break{page-break-before:always}
+  .avoid{page-break-inside:avoid}
+  .muted{color:var(--graphite)}
+  .mono{font-family:var(--mono);font-size:8.8pt}
+  .big{font-family:var(--serif);font-size:19pt;line-height:1.2;margin:2px 0 8px}
+
+  .toc{columns:2;column-gap:26px;font-size:9.4pt}
+  .toc li{margin-bottom:2.5px;break-inside:avoid}
+
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:0 0 14px}
+  .kpi div{border:1px solid var(--hair);border-radius:5px;padding:8px 10px;text-align:center}
+  .kpi .v{font-family:var(--serif);font-size:16pt;line-height:1.1;display:block}
+  .kpi .l{font-size:7.6pt;text-transform:uppercase;letter-spacing:.05em;color:var(--graphite)}
+</style>
+</head>
+<body>
+
+<div class="rule"></div>
+<h1>SahAI — AI Voice&nbsp;Co-Pilot for Inside Sales</h1>
+<p class="lede">Complete project brief · everything the team needs before the presentation</p>
+
+<table style="margin-bottom:16px">
+  <tr><td style="width:26%"><strong>Track</strong></td><td>AI Build 2026 · Voice Co-Pilot (Pay-in-3)</td></tr>
+  <tr><td><strong>Repository</strong></td><td class="mono">github.com/KL2300030695/SahAI</td></tr>
+  <tr><td><strong>Stack</strong></td><td>Groq (5 open-weights models) · FastAPI · React 18 · Chroma + BM25 · SQLite · Firestore · Google Sheets · Docker</td></tr>
+  <tr><td><strong>Scale</strong></td><td>64 source files · ~11,100 lines · 187 tests, all offline</td></tr>
+  <tr><td><strong>Measured cost</strong></td><td><strong>$0.0037 per call (₹0.31)</strong> — 55× cheaper than a single frontier mega-prompt</td></tr>
+</table>
+
+<div class="kpi">
+  <div><span class="v">6</span><span class="l">agents</span></div>
+  <div><span class="v">8</span><span class="l">guardrails (6 in code)</span></div>
+  <div><span class="v">28%</span><span class="l">stages at zero cost</span></div>
+  <div><span class="v">187</span><span class="l">tests passing</span></div>
+</div>
+
+<h2>Contents</h2>
+<div class="toc">
+<ol>
+  <li>The one-paragraph version</li>
+  <li>The problem, and why it is hard</li>
+  <li>What the product actually is</li>
+  <li>The pipeline, stage by stage</li>
+  <li>Cost: how 55× is achieved</li>
+  <li>The eight guardrails</li>
+  <li>Where automation stops</li>
+  <li>Enterprise architecture</li>
+  <li>The dashboard, screen by screen</li>
+  <li>Data and the knowledge base</li>
+  <li>Running it</li>
+  <li>Scoring: how we meet the rubric</li>
+  <li>Known limits, stated</li>
+  <li>Bugs we found and fixed</li>
+  <li>Demo script (8 minutes)</li>
+  <li>Questions judges will ask</li>
+  <li>Glossary</li>
+</ol>
+</div>
+
+<h2>1 · The one-paragraph version</h2>
+<p>
+  SahAI listens to a live sales call and puts <strong>one sentence</strong> on the agent's screen —
+  the next thing to say — with every figure in it underlined and traced back to the exact clause of
+  the product handbook it came from. It understands intent, retrieves the right terms, checks its own
+  output against eight guardrails, and after the call writes a summary, proposes a CRM update and
+  drafts a follow-up. It never speaks to the customer, and it cannot write to a customer record on
+  its own. Both of those are enforced by code and a state machine, not requested in a prompt.
+</p>
+
+<h2>2 · The problem, and why it is hard</h2>
+<p>
+  A fintech has launched <strong>Pay-in-3</strong>: a purchase split into three equal monthly
+  instalments at zero additional cost. The product is genuinely good — the customer repays exactly
+  the cart value. It is also <em>hard to sell honestly</em>, for three reasons:
+</p>
+<ul>
+  <li><strong>"Zero-cost" invites disbelief.</strong> The honest answer involves a merchant-funded
+      business model, plus a late fee and a bounce fee that <em>do</em> exist. An agent who
+      oversimplifies creates a complaint later.</li>
+  <li><strong>KYC is where people leave.</strong> Aadhaar and PAN steps trigger privacy anxiety, and
+      the recovery script differs per objection.</li>
+  <li><strong>Consistency, not capability, is the gap.</strong> The best agent already quotes the
+      right fee and logs the real drop-off reason. The other nineteen do it unevenly. The lever is
+      <strong>variance</strong>.</li>
+</ul>
+
+<h2>3 · What the product actually is</h2>
+<div class="box good">
+  <span class="t">Co-pilot, not bot</span>
+  <p>The AI never addresses the customer. A human reads the suggested line and says it in their own
+     words. That is what makes the guardrails meaningful — there is always a person between the model
+     and the customer, and that person can disagree.</p>
+</div>
+<p>
+  The agent sees a single serif sentence at speaking size. Everything else on screen exists to answer
+  one question: <em>can I trust that line?</em> Figures traced to a source are underlined
+  <span style="border-bottom:2px solid var(--verified)">inside the sentence itself</span>, not listed
+  in a footnote panel — because an agent mid-call has under a second to look.
+</p>
+
+<h2 class="page-break">4 · The pipeline, stage by stage</h2>
+<p>Every stage has a typed input and output. Cost and tier are recorded for each one.</p>
+
+<pre class="tight">  AUDIO IN  ─ microphone (browser VAD) ─ or ─ uploaded recording ─ or ─ scripted replay
+      │
+      ▼
+ [0] CONSENT GATE          code        raises if consent is not on record — no bypass path exists
+      │
+ [1] TRANSCRIBE            STT         whisper-large-v3-turbo, one utterance at a time
+      │                                TranscriptTurn{index, speaker, text, ts}
+ [2] INJECTION SCREEN      TINY        llama-prompt-guard-2-86m · an attack never reaches a
+      │                                reasoning model — halted for ~$0.000001
+ [3] INTENT                CHEAP       llama-3.1-8b-instant
+      │                                {intent, confidence, entities, sentiment, dropoff_risk}
+ [4] RETRIEVAL             NONE        Chroma (local ONNX MiniLM) + BM25 → reciprocal rank fusion
+      │                                $0.00 · single-digit ms · 83 chunks from 19 documents
+ [5] NEXT BEST ACTION      STANDARD    gpt-oss-20b, escalating to gpt-oss-120b by CODE rules
+      │  → HIGH                        {say, why, action_type, cited_chunk_ids, requires_human_confirmation}
+ [6] SELF-CHECK            code →      8 checks; 6 are plain Python. Then gpt-oss-safeguard-20b
+      │  SAFETY/HIGH                   adjudicates conduct against the Business Goals
+      ▼
+   SURFACED TO THE AGENT   WebSocket push — event-driven, not polled
+      │
+   ══ end of call ══
+      ▼
+ [7] POST-CALL             HIGH        summary · disposition · drop-off reason · CRM patch ·
+      │                                follow-up draft · conversion probability
+ [8] SELF-CHECK (post)     code+HIGH   internal note vs customer-facing message are judged differently
+      ▼
+ ╔══════════════════════════════════════════════════════════════════════════════╗
+ ║  AUTOMATION STOPS.  send_status = pending_agent_approval                     ║
+ ╚══════════════════════════════════════════════════════════════════════════════╝
+      ▼
+ [9] HUMAN APPROVAL        —           the only path that writes to a customer record</pre>
+
+<h3>Agents never import each other</h3>
+<p>
+  Every agent's input and output type lives in <code>app/schemas.py</code>, and agents import from
+  there and nowhere else. That single constraint is what makes this a multi-agent system rather than
+  a mega-prompt with headings: each agent can be tested, swapped or re-tiered in isolation because
+  its only coupling is to a Pydantic type. The orchestrator is the one module that knows the shape.
+</p>
+
+<h3>Routing is code, not prompt text</h3>
+<p>
+  Six named predicates decide whether a turn goes to the 20B or the 120B model. They are served at
+  <code>/api/policy</code> so the tiering is inspectable rather than a claim on a slide.
+</p>
+<table>
+  <tr><th>Rule</th><th>Fires when</th></tr>
+  <tr><td class="mono">sensitive_intent</td><td>intent is eligibility, objection_cost, objection_trust, complaint or payment_issue</td></tr>
+  <tr><td class="mono">credit_terms_in_context</td><td>the <em>customer's own words</em> mention credit terms</td></tr>
+  <tr><td class="mono">high_dropoff_risk</td><td>risk &gt; 0.6</td></tr>
+  <tr><td class="mono">low_intent_confidence</td><td>classifier confidence &lt; 0.6</td></tr>
+  <tr><td class="mono">negative_sentiment</td><td>frustrated, angry, or in a hurry</td></tr>
+  <tr><td class="mono">agent_requested</td><td>the agent asked for a second opinion</td></tr>
+</table>
+<div class="box warn">
+  <span class="t">A costly bug worth telling</span>
+  <p>The <code>credit_terms_in_context</code> rule originally read the <em>retrieved knowledge-base
+     text</em> as well as the customer's words. That sounds reasonable and is badly wrong: this is a
+     credit product, so every retrieved chunk mentions fees — and roughly 90% of turns escalated to
+     the expensive model. Scoping it to the customer's own words took cost from $0.0043 to $0.0032
+     per call with no loss of safety.</p>
+</div>
+
+<h3>Retrieval refuses to guess</h3>
+<p>
+  Reciprocal rank fusion scores <em>rank position</em>, not relevance. Before a confidence floor
+  existed, the top hit for <em>"how do I reset my wifi router"</em> scored exactly as highly as the
+  top hit for <em>"what is the late fee"</em> — four confident-looking chunks with real IDs came back
+  for both. The floor was measured, not guessed:
+</p>
+<table>
+  <tr><th>Cosine similarity on the intent-expanded query</th><th class="num">min</th><th class="num">max</th></tr>
+  <tr><td>in-domain (20 utterances)</td><td class="num"><strong>0.4807</strong></td><td class="num">0.7008</td></tr>
+  <tr><td>off-topic (12 utterances)</td><td class="num">0.1406</td><td class="num"><strong>0.4480</strong></td></tr>
+</table>
+<p>
+  <code>MIN_COSINE = 0.40</code>. Below it <strong>no citations are returned at all</strong> — not a
+  low-confidence flag beside the chunks. A model handed plausible fee tables will quote them whatever
+  flag sits alongside; withholding the text is the only thing that works. BM25 stays a <em>ranking</em>
+  contributor (it catches "₹250" and "PAN") and is never consulted for confidence, because measured
+  on this corpus the wifi-router query outscores most real product questions on BM25 alone — it
+  rewards the common tokens in "how do I". Reproduce with
+  <code>python -m scripts.calibrate_retrieval</code>.
+</p>
+
+<h2 class="page-break">5 · Cost: how 55× is achieved</h2>
+<p>
+  Every figure comes from the <code>usage</code> field of real API responses, priced by
+  <code>backend/app/config.py</code>, and persisted per decision. Nothing is estimated.
+</p>
+<table>
+  <tr><th>Seed scenario</th><th class="num">Stages</th><th class="num">Tokens</th><th class="num">SahAI</th><th class="num">One frontier mega-prompt</th><th class="num">Ratio</th></tr>
+  <tr><td>call-001 · won / hidden charges</td><td class="num">47</td><td class="num">33,024</td><td class="num">$0.004134</td><td class="num">$0.2356</td><td class="num"><strong>57×</strong></td></tr>
+  <tr><td>call-002 · dropped / Aadhaar</td><td class="num">48</td><td class="num">31,527</td><td class="num">$0.004592</td><td class="num">$0.2191</td><td class="num"><strong>48×</strong></td></tr>
+  <tr><td>call-003 · won / credit score</td><td class="num">54</td><td class="num">34,359</td><td class="num">$0.004270</td><td class="num">$0.2423</td><td class="num"><strong>57×</strong></td></tr>
+  <tr><td>call-004 · not interested</td><td class="num">31</td><td class="num">16,101</td><td class="num">$0.001860</td><td class="num">$0.1126</td><td class="num"><strong>61×</strong></td></tr>
+  <tr><td><strong>Mean</strong></td><td class="num"></td><td class="num"></td><td class="num"><strong>$0.003714</strong><br><span class="muted">₹0.31</span></td><td class="num"><strong>$0.2024</strong></td><td class="num"><strong>55×</strong></td></tr>
+</table>
+<p>At <strong>10,000 calls/month: $37 vs $2,024.</strong> At 100,000: $371 vs $20,240.</p>
+
+<h3>Where the money goes</h3>
+<table>
+  <tr><th>Tier</th><th>Model</th><th class="num">Stages</th><th class="num">Share of cost</th></tr>
+  <tr><td>high</td><td class="mono">openai/gpt-oss-120b</td><td class="num">59</td><td class="num">42.2%</td></tr>
+  <tr><td>standard</td><td class="mono">openai/gpt-oss-20b</td><td class="num">53</td><td class="num">21.3%</td></tr>
+  <tr><td>stt</td><td class="mono">whisper-large-v3-turbo</td><td class="num">92</td><td class="num">13.8%</td></tr>
+  <tr><td>safety</td><td class="mono">openai/gpt-oss-safeguard-20b</td><td class="num">48</td><td class="num">13.5%</td></tr>
+  <tr><td>cheap</td><td class="mono">llama-3.1-8b-instant</td><td class="num">87</td><td class="num">9.0%</td></tr>
+  <tr><td>tiny</td><td class="mono">llama-prompt-guard-2-86m</td><td class="num">88</td><td class="num">0.1%</td></tr>
+  <tr><td><strong>none</strong></td><td><strong>local compute</strong></td><td class="num"><strong>185</strong></td><td class="num"><strong>0.0%</strong></td></tr>
+</table>
+<div class="box good">
+  <span class="t">185 of 652 pipeline stages (28%) cost nothing at all</span>
+  <p>Retrieval and six of the eight guardrails are local compute. That is the concrete form of the
+     brief's principle that "a smaller open-source model, RAG, or a classical solver could replace
+     constant calls to an expensive commercial LLM".</p>
+</div>
+
+<h4>Three levers, not one</h4>
+<ol>
+  <li><strong>Cost tiering.</strong> An 86M classifier screens every turn; an 8B model does intent; a
+      20B model handles routine suggestions; the 120B is reserved for credit terms and objections.</li>
+  <li><strong>RAG instead of inference.</strong> Retrieval is the highest-frequency step and costs
+      $0.00 — local embeddings plus BM25, no torch.</li>
+  <li><strong>Reasoning-effort control.</strong> The reasoning models bill chain-of-thought as output
+      tokens. Measured on an identical prompt: <code>low</code> = 150 completion tokens,
+      <code>medium</code> = 334 — 2.2× the cost for the same answer.</li>
+</ol>
+<p class="muted">
+  The baseline is deliberately conservative: it prices only the tokens actually spent. A real
+  mega-prompt would also carry the whole handbook in context on every turn instead of retrieving four
+  chunks, so the true gap is wider than the number claims.
+</p>
+
+<h2 class="page-break">6 · The eight guardrails</h2>
+<p>
+  <code>enforced_by</code> is shipped to the UI so a reviewer can see which checks are un-promptable
+  code and which are model judgement. We do not blur the distinction.
+</p>
+<table>
+  <tr><th>Check</th><th>By</th><th>What it catches</th></tr>
+  <tr><td class="mono">consent_recorded</td><td><span class="tag ok">code</span></td><td>Any turn processed without consent on record</td></tr>
+  <tr><td class="mono">pii_redaction</td><td><span class="tag ok">code</span></td><td>Aadhaar, PAN, card, phone — masked before storage <em>and</em> display</td></tr>
+  <tr><td class="mono">grounding</td><td><span class="tag ok">code</span></td><td>Any figure not present verbatim in a cited chunk</td></tr>
+  <tr><td class="mono">no_stale_terms</td><td><span class="tag ok">code</span></td><td>Clauses past their <code>effective_to</code> date</td></tr>
+  <tr><td class="mono">no_autonomous_credit_terms</td><td><span class="tag ok">code</span></td><td>Forces human confirmation on credit language</td></tr>
+  <tr><td class="mono">no_fabricated_actions</td><td><span class="tag ok">code</span></td><td>"I've already sent you an email" — the worst available failure</td></tr>
+  <tr><td class="mono">injection_screen</td><td><span class="tag mid">llm</span></td><td>Prompt-injection attempts</td></tr>
+  <tr><td class="mono">goal_alignment</td><td><span class="tag mid">llm</span></td><td>Drift from the business conduct policy</td></tr>
+</table>
+
+<h3>Grounding asks a different question after the call</h3>
+<p>
+  A live suggestion is grounded against the <strong>handbook</strong>. A post-call summary is grounded
+  against the <strong>call it summarises</strong> — because a summary's figures come from the
+  conversation, not the knowledge base. Asking the handbook question of a summary was a guaranteed
+  false positive (post-call retrieval passes no citations), so every summary mentioning any number
+  failed. What the transcript check catches is real: a summariser inventing a number and writing it
+  into a customer's record.
+</p>
+
+<h3>Grounding and the interface share one function</h3>
+<p>
+  <code>ground_figures()</code> returns the character offsets the Say Line underlines <em>and</em> the
+  verdict the guardrail blocks on. One function, one source of truth — the marks the agent sees and
+  the decision to block can never disagree.
+</p>
+
+<h2>7 · Where automation stops</h2>
+<pre class="tight">  AUTOMATIC — no human in the loop
+  ├─ transcription → intent → retrieval → suggestion → surfaced to the agent
+  ├─ post-call summary, disposition, drop-off reason
+  ├─ CRM patch          ← PROPOSED, written to the call log only
+  └─ follow-up message  ← DRAFTED
+
+  ═══════════════ send_status = pending_agent_approval ═══════════════
+
+  REQUIRES A NAMED, AUTHENTICATED HUMAN
+  ├─ applying the patch to the customer record
+  └─ sending the message to the customer</pre>
+<p>
+  <code>POST /api/calls/{id}/approve</code> is the only route that can move that state. It requires a
+  capability the credential carries, and <strong>no agent can call it</strong>.
+</p>
+<div class="box stop">
+  <span class="t">The failure this caught, in our own system</span>
+  <p>The post-call check correctly caught a draft claiming Pay-in-3 was entirely free with no mention
+     of the late fee, and wrote the failing verdict to the trace. The approve endpoint <em>never read
+     it</em> — the message was written and marked <code>sent</code>, with the check that rejected it
+     rendered on the same screen. <strong>A guardrail nothing consumes is decoration.</strong> The
+     verdict is now load-bearing: a blocked message is refused, and the way past it is a rewrite, not
+     another click. An edited message is re-checked against the deterministic rules, and the override
+     is recorded in the audit trace under the approver's name — because the accountable act is a human
+     choosing different words, not a human dismissing a warning.</p>
+</div>
+
+<h2 class="page-break">8 · Enterprise architecture</h2>
+
+<h3>Access control, and who signs an approval</h3>
+<div class="box stop">
+  <span class="t">Another claim that was unenforced</span>
+  <p>The approver's name used to arrive as a <em>string in the request body</em>, and nothing was
+     authenticated. Anyone who could reach the port could approve as anyone. A human-oversight gate
+     whose identity is self-asserted is a convention, not a control.</p>
+</div>
+<p>
+  <strong>The approver is now who the credential says they are.</strong> The request body no longer
+  carries a name at all, and the dashboard shows the identity it will sign with rather than asking
+  for one — a field the server ignores teaches the wrong thing about where authority comes from.
+</p>
+<table>
+  <tr><th>Role</th><th>read</th><th>run calls</th><th>approve</th><th>sync integrations</th></tr>
+  <tr><td class="mono">viewer</td><td>✔</td><td></td><td></td><td></td></tr>
+  <tr><td class="mono">agent</td><td>✔</td><td>✔</td><td>✔</td><td></td></tr>
+  <tr><td class="mono">admin</td><td>✔</td><td>✔</td><td>✔</td><td>✔</td></tr>
+</table>
+<ul>
+  <li>Keys compared with <code>hmac.compare_digest</code> — no timing side channel.</li>
+  <li>Reads stay open, so a fresh clone still shows a working dashboard. Writes never do.</li>
+  <li>A write made while auth is off is stamped <code>(unauthenticated)</code> in the audit trail —
+      otherwise, a year later, nobody could tell a signed approval from one made on an open port.</li>
+  <li><strong>Sign-in exists; sign-up deliberately does not.</strong> Nobody self-registers for the
+      system that writes to customer records. The screen states the provisioning model where a
+      "create an account" link would sit.</li>
+</ul>
+
+<h3>The CRM is a port, not a table</h3>
+<p>The pipeline talks to a four-method interface. Nothing outside that module knows what is behind it.</p>
+<pre>read_snapshot   ·   is_do_not_call   ·   apply_patch   ·   describe</pre>
+<div class="box">
+  <span class="t">Why <code>is_do_not_call</code> is separate from the snapshot</span>
+  <p>Both read the same record, but a snapshot is <em>advisory context for a language model</em> and
+     do-not-call is a <em>legal obligation checked in code before drafting</em>. Merging them would
+     make the obligation depend on a field surviving a model's attention.</p>
+</div>
+<p>
+  Two adapters ship. <code>SqliteCrm</code> is the demo default. <code>RestCrm</code> talks to any HTTP
+  CRM and is <strong>configured, not coded</strong> — field names included, because
+  <code>kyc_status</code> here is <code>KYC_Status__c</code> there. Its failure policies differ by
+  method on purpose, and each has a test:
+</p>
+<table>
+  <tr><th>Failure</th><th>Policy</th><th>Why</th></tr>
+  <tr><td>read fails</td><td>degrade to no snapshot</td><td>less context is worse assistance, not a safety problem — the call continues</td></tr>
+  <tr><td>do-not-call check fails</td><td><strong>return True</strong></td><td>an unreachable CRM is not permission to call someone who may have opted out</td></tr>
+  <tr><td>write fails</td><td>report, leave pending</td><td>nothing is silently lost</td></tr>
+</table>
+<p class="muted">
+  <code>RestCrm</code> is tested against a real stub HTTP server, not a mock — so the claim is "this
+  works against an HTTP CRM", not "we imagined one".
+</p>
+
+<h3>Deployment and operations</h3>
+<pre>docker compose up --build      →   http://localhost:8000</pre>
+<p>
+  One service, not three: the dashboard is built into the same image that serves the API, so there is
+  no proxy to configure and no CORS to get wrong between a laptop and a server. The knowledge base is
+  indexed at <em>image build time</em> — otherwise the first call of a demo pays to embed 19 documents
+  and a cold container looks broken rather than slow.
+</p>
+<table>
+  <tr><th>Endpoint</th><th>Purpose</th></tr>
+  <tr><td class="mono">GET /healthz</td><td>Liveness. Checks <em>nothing else</em> — a probe that touches the database restarts a healthy container into a crash loop when the database blips.</td></tr>
+  <tr><td class="mono">GET /readyz</td><td>Readiness: database + knowledge-base index. <strong>Not</strong> the model provider — a quota failure is already a per-request 503 with an explanation, and pulling the instance would take the dashboard down too.</td></tr>
+  <tr><td class="mono">every response</td><td><code>X-Request-ID</code> and <code>X-Response-Time-ms</code>. A call fans out across six agents and two mirrors; timestamps stop correlating the moment two agents are on the phone at once.</td></tr>
+</table>
+
+<h3>Where the data goes</h3>
+<table>
+  <tr><th>Destination</th><th>Role</th><th>Status</th></tr>
+  <tr><td>SQLite</td><td>System of record — transactional, sub-millisecond, offline</td><td><span class="tag ok">live</span></td></tr>
+  <tr><td>Firestore</td><td>Durable cloud mirror · <code>sahai_calls</code> + <code>stages</code> subcollections</td><td><span class="tag ok">38 calls, 671 docs</span></td></tr>
+  <tr><td>Google Sheets</td><td>Calls tab + Trace tab, upserted by <code>call_id</code></td><td><span class="tag ok">38 calls, 632 stages</span></td></tr>
+  <tr><td>CSV</td><td><code>/api/export/calls.csv</code> and <code>/api/export/trace.csv</code></td><td><span class="tag ok">live</span></td></tr>
+</table>
+<div class="box">
+  <span class="t">Why SQLite stays the system of record</span>
+  <p><code>get_crm_snapshot</code> runs on <em>every turn</em> inside a ~1s latency budget. A Firestore
+     read from India is a 50–200 ms round trip — a fifth of the budget spent on network, and a demo
+     that fails whenever the wifi does. Every write lands locally first and is mirrored afterwards.
+     All the data reaches Firestore; the customer on the phone never waits for it. Both mirrors are
+     best-effort: an outage is counted and reported at <code>/api/integrations/status</code>, never
+     raised. There is a test that an approval still succeeds with both mirrors throwing.</p>
+</div>
+<p>
+  <strong>One row builder feeds all four destinations.</strong> The mirrors consume the same functions
+  the CSV endpoints use, so a file, a Firestore document and a spreadsheet row can never disagree
+  about what a call cost.
+</p>
+
+<h2 class="page-break">9 · The dashboard, screen by screen</h2>
+
+<h4>Sign in</h4>
+<p>One screen. Your key decides what you can do and is the name that goes on anything you approve.
+   No self-registration — the screen says accounts are provisioned by an administrator.</p>
+
+<h4>Idle</h4>
+<p>The opening consent script is shown <em>before</em> the call starts, so the agent reads it rather
+   than improvising. Below it: start a microphone call, or rehearse on one of four past calls.</p>
+
+<h4>Consent</h4>
+<p>Full-width, serif, at speaking size. Nothing runs until it is on record — the co-pilot does not
+   warn about missing consent, it refuses to process a single turn without it.</p>
+
+<h4>Live call</h4>
+<table>
+  <tr><th>Element</th><th>What it does</th></tr>
+  <tr><td><strong>Say Line</strong></td><td>The signature element. One sentence, serif, 23px — the only large type on screen. Traced figures underlined <em>inside</em> the sentence. Four states: ready · you confirm this · held · listening.</td></tr>
+  <tr><td><strong>Conversation</strong></td><td>Customer turns carry more weight than the agent's own — the agent already knows what they said. Intent chips per turn.</td></tr>
+  <tr><td><strong>Their record</strong></td><td>The CRM, with a dot marking exactly the fields the co-pilot reads. Do-not-call renders first and loud. Credit limit is shown to the agent but deliberately <em>not</em> sent to the model.</td></tr>
+  <tr><td><strong>What this used</strong></td><td>The retrieved chunks, with document title, version and chunk ID.</td></tr>
+  <tr><td><strong>Evidence strip</strong></td><td>Collapsed by default. Every check, how it was enforced, the running cost and the ratio.</td></tr>
+</table>
+
+<h4>Approval</h4>
+<p>The mirror of consent. The call opened with words a human spoke; it closes with a decision a human
+   signs. CRM changes render as a real before → after diff with strikethrough. "Nothing has been
+   written yet" until you act.</p>
+
+<h3>Design decisions worth defending</h3>
+<ul>
+  <li><strong>Inline provenance over a citations panel.</strong> An agent mid-call has under a second.
+      A footnote list is read after the fact, or never.</li>
+  <li><strong>The microphone goes deaf while the co-pilot speaks.</strong> On a laptop the suggestion
+      comes out of the speakers next to the mic; without a gate the pipeline transcribes its own
+      voice, files it as the customer, and answers itself. Nothing in the transcript looks wrong — it
+      just fills with fluent sentences nobody said.</li>
+  <li><strong>The evidence strip reports findings, not consequences.</strong> It once read "N checks
+      stopped this" above a call that had been signed off and written. The Say Line and the approval
+      band report consequences; they are the two places that know.</li>
+</ul>
+
+<h2>10 · Data and the knowledge base</h2>
+<table>
+  <tr><th>Source the brief asks for</th><th>How we use it</th></tr>
+  <tr><td>Call recordings / transcripts</td><td>Whisper on live mic and uploads; four seeded transcripts for rehearsal</td></tr>
+  <tr><td>CRM records and past interactions</td><td><code>past_interactions</code> and <code>last_disposition</code> reach the suggestion prompt; shown to the agent in "Their record"</td></tr>
+  <tr><td>Product, offer, KYC process information</td><td>19 documents → 83 chunks, versioned with validity windows</td></tr>
+  <tr><td>Successful vs unsuccessful conversations</td><td>Two won and two dropped seed calls, with the drop-off reason captured per call</td></tr>
+</table>
+<div class="box good">
+  <span class="t">Stale terms are exercised, not assumed</span>
+  <p>The knowledge base deliberately contains an <strong>expired 2024 fee schedule</strong>. Three
+     chunks are past their <code>effective_to</code> date. They are dropped at retrieval — before the
+     reasoning model sees them — and the <code>no_stale_terms</code> guardrail is the second line of
+     defence. This is how the brief's "never quote stale terms" rule is proven rather than claimed.</p>
+</div>
+
+<h2 class="page-break">11 · Running it</h2>
+<h4>Prerequisites</h4>
+<p>Python 3.10+, Node 18+, a <a href="https://console.groq.com/keys">Groq API key</a>.</p>
+<pre># 1 · backend
+cd backend
+python -m venv .venv
+.venv\Scripts\activate           # Windows      (source .venv/bin/activate on macOS/Linux)
+pip install -r requirements.txt
+
+# 2 · .env in the REPO ROOT (gitignored — never commit it)
+GROQ_API_KEY=gsk_your_key_here
+MODEL_TINY=meta-llama/llama-prompt-guard-2-86m
+MODEL_CHEAP=llama-3.1-8b-instant
+MODEL_STANDARD=openai/gpt-oss-20b
+MODEL_HIGH=openai/gpt-oss-120b
+MODEL_SAFETY=openai/gpt-oss-safeguard-20b
+MODEL_STT=whisper-large-v3-turbo
+SAHAI_MOCK=0                     # 1 = run with no API calls at all
+AUTH_ENABLED=1
+API_KEYS=k_agent_priya:Priya Nair:agent,k_view_anita:Anita Rao:viewer,k_admin_ravi:Ravi Menon:admin
+
+# 3 · build the knowledge base and seed the CRM
+python -m app.rag.ingest         # 19 documents → 83 chunks
+python -m app.seed.seed_db
+
+# 4 · run  (two terminals)
+uvicorn app.main:app --reload --port 8000
+cd frontend && npm install && npm run dev      →  http://localhost:5173</pre>
+
+<h4>Or one command</h4>
+<pre>docker compose up --build        →  http://localhost:8000</pre>
+
+<h4>Useful commands</h4>
+<pre>pytest                                          # 187 tests, no network
+python -m scripts.run_full_pipeline call-001     # one call through every stage + cost breakdown
+python -m scripts.calibrate_retrieval            # reproduce the retrieval floor from measurements
+curl localhost:8000/api/policy                   # the routing policy and pricing, as served
+curl localhost:8000/readyz                       # database, index, auth mode, CRM connector
+curl -X POST localhost:8000/api/integrations/sync -H "X-API-Key: k_admin_ravi"</pre>
+
+<div class="box warn">
+  <span class="t">Groq's free tier is ~7 full calls per day</span>
+  <p>200,000 tokens/day, and the cap is <strong>per organization, not per API key</strong> — issuing a
+     new key on the same account does not reset it. Do not rehearse on the same UTC day as the demo.
+     <code>SAHAI_MOCK=1</code> runs every path with nothing billed.</p>
+</div>
+
+<h2>12 · Scoring: how we meet the rubric</h2>
+<table>
+  <tr><th>Dimension</th><th class="num">Wt</th><th>Where it lands</th></tr>
+  <tr><td><strong>Business Impact</strong></td><td class="num">20%</td>
+      <td>The lever is variance, not capability. Every agent quotes the right fee, pre-empts the Aadhaar step, logs the real drop-off reason, and no drop-off goes un-followed-up. Unit economics measured, not modelled.</td></tr>
+  <tr><td><strong>AI Innovation &amp; Depth</strong></td><td class="num">20%</td>
+      <td>Six cooperating agents coupled only to schemas. Routing by code predicates. Hybrid RAG with a <em>measured</em> confidence floor. Grounding that returns character offsets so the UI and the verdict share one function.</td></tr>
+  <tr><td><strong>Technical Excellence</strong></td><td class="num">20%</td>
+      <td>187 offline tests written against failures that actually happened. Deterministic guardrails. Provider failures translated into sentences, not 500s. Contract tests against a real stub server.</td></tr>
+  <tr><td><strong>Enterprise Architecture</strong></td><td class="num">15%</td>
+      <td>CRM as a four-method port with two adapters. API-key auth with roles, identity from the credential. Docker one-command deploy, liveness/readiness split, request correlation. Four output destinations from one row builder.</td></tr>
+  <tr><td><strong>User Experience</strong></td><td class="num">10%</td>
+      <td>One sentence at speaking size with inline provenance. Two weighted human moments. Interface says what it wants from you in plain language, never a raw status code.</td></tr>
+  <tr><td><strong>Scalability, Security &amp; Cost</strong></td><td class="num">10%</td>
+      <td>$0.0037/call measured. 28% of stages at zero marginal cost. PII masked before storage and display. Consent as a code gate. Auth enforced. Secrets gitignored and excluded from the build context.</td></tr>
+  <tr><td><strong>Presentation</strong></td><td class="num">5%</td>
+      <td>README, business pitch, this brief, and a rehearsed 8-minute script.</td></tr>
+</table>
+
+<h2 class="page-break">13 · Known limits, stated</h2>
+<p>
+  Naming your own gaps reads far better than being caught by them. Every one of these is in the
+  README under "Known limits".
+</p>
+<table>
+  <tr><th>Limit</th><th>Detail</th></tr>
+  <tr><td><strong>Grounding validates only numeric claims</strong></td>
+      <td>Every figure is verified against its source, but a sentence like <em>"we never share your Aadhaar"</em> contains no numbers and passes unchecked. Only the <code>goal_alignment</code> LLM check sits beneath it. <strong>This is the largest open gap</strong> and we say so first.</td></tr>
+  <tr><td>Two-party speaker attribution</td>
+      <td>One microphone cannot separate two speakers, so every utterance is attributed to the customer. Assumes speakerphone or a solo run. Real diarization needs a carrier integration or a diarizing STT model.</td></tr>
+  <tr><td>Telephony was removed deliberately</td>
+      <td>An earlier version took real inbound calls over Twilio and got exact attribution from dual tracks. Cut because a phone number is a recurring cost. The orchestrator never knew about it, so restoring it is one adapter, not a redesign.</td></tr>
+  <tr><td>Live-call state is in memory</td>
+      <td>A backend restart loses in-flight calls. Fine for one process; a real deployment needs Redis.</td></tr>
+  <tr><td>No multi-tenancy</td>
+      <td>Principals carry a role but not an organisation, so data is not tenant-scoped. The <code>Principal</code> type is the seam where it would go.</td></tr>
+  <tr><td>Groq quota</td>
+      <td>~7 full calls per free-tier day, per organization.</td></tr>
+</table>
+
+<h2>14 · Bugs we found and fixed</h2>
+<p class="muted">Useful to know — a judge may probe any of these, and the honest answer is stronger than a deflection.</p>
+<table>
+  <tr><th>Bug</th><th>Why it mattered</th></tr>
+  <tr><td>Guardrail verdict was never read at the approve gate</td><td>A message the system itself rejected was written and marked <code>sent</code>. The core safety claim was false at the one place it had to hold.</td></tr>
+  <tr><td>Approver identity was a request-body string</td><td>Anyone reaching the port could approve as anyone. Human oversight was a convention, not a control.</td></tr>
+  <tr><td>Routing read the retrieved KB text</td><td>Every chunk mentions fees in a credit product → ~90% escalation. Cost fell 25% when scoped to the customer's words.</td></tr>
+  <tr><td>Retrieval had no confidence floor</td><td>RRF scores rank, not relevance — off-topic queries returned four confident-looking citations.</td></tr>
+  <tr><td>Post-call grounding used the wrong source</td><td>Every summary containing any number failed. A guardrail that cries wolf teaches agents to ignore the panel where real blocks appear.</td></tr>
+  <tr><td>PII redaction ordering</td><td>A 16-digit card's first 12 digits matched the Aadhaar pattern → <code>card [AADHAAR_REDACTED] 1111</code>, leaking four digits.</td></tr>
+  <tr><td>The co-pilot's TTS fed back into the microphone</td><td>The pipeline transcribed its own voice as the customer and answered itself.</td></tr>
+  <tr><td>The test suite wrote to the live Firestore project</td><td>187 tests passed while creating documents named <code>test-approval-gate</code> beside real calls.</td></tr>
+  <tr><td>Sheets bulk sync hit Google's read quota</td><td>Stopped at 19 of 38 and left a half-filled tab that looks exactly like missing data.</td></tr>
+  <tr><td>Quota exhaustion surfaced as "500 Internal Server Error"</td><td>Told an agent with a customer on the line nothing about whose fault it was.</td></tr>
+</table>
+
+<h2>15 · Demo script — 8 minutes</h2>
+<table>
+  <tr><th class="num">Time</th><th>Beat</th><th>Say / show</th></tr>
+  <tr><td class="num">0:00</td><td>Problem</td><td>"Pay-in-3 is genuinely zero-cost — and that is exactly why it is hard to sell. 'Zero cost' invites disbelief, the honest answer involves a late fee, and twenty agents answer twenty different ways."</td></tr>
+  <tr><td class="num">0:45</td><td>Sign in</td><td>Sign in as Priya · agent. "Your key decides what you can do — and it is the name that goes on anything you approve."</td></tr>
+  <tr><td class="num">1:15</td><td>Consent</td><td>Show the script pre-written. "Nothing runs until this is on record. Not a warning — the orchestrator raises."</td></tr>
+  <tr><td class="num">1:45</td><td class="mono"><strong>The Say Line</strong></td><td><strong>The core moment.</strong> Customer asks about hidden charges. One sentence appears. Hover a teal-underlined figure → document, version, chunk ID. "Every number is traced. Unmarked means unsourced — and unsourced never reaches this screen."</td></tr>
+  <tr><td class="num">3:00</td><td>Their record</td><td>Point at the dots. "These four fields are what the co-pilot reads. The credit limit is shown to the agent but never sent to the model — it must not predict a limit."</td></tr>
+  <tr><td class="num">3:30</td><td>Escalation</td><td>Credit-terms turn → band turns amber, tier path shows <code>high</code>. "A code rule escalated this, not a prompt. Six named rules, served at /api/policy."</td></tr>
+  <tr><td class="num">4:15</td><td>Injection</td><td>call-004 has a real attempt. "Halted by an 86-million-parameter classifier for a millionth of a dollar, before any reasoning model saw it."</td></tr>
+  <tr><td class="num">5:00</td><td>Approval</td><td>End the call. Before → after diff. "Signing as Priya Nair — taken from the credential, it cannot be typed. This is the only path that writes to a customer record, and no agent can call it."</td></tr>
+  <tr><td class="num">6:00</td><td class="mono"><strong>Cost</strong></td><td>Open the evidence strip. "$0.0037 a call, 55× cheaper — from real usage fields, not a model. And 185 of 652 stages cost nothing at all."</td></tr>
+  <tr><td class="num">7:00</td><td>Architecture</td><td>One slide: six agents, five models, the code/LLM guardrail split, the four output destinations.</td></tr>
+  <tr><td class="num">7:30</td><td>Roadmap + honesty</td><td>"The largest open gap is that grounding validates numbers, not claims like 'we never share your Aadhaar'. That is next."</td></tr>
+</table>
+<div class="box warn">
+  <span class="t">Rehearsal rules</span>
+  <p>Set <code>VITE_API_KEY=k_agent_priya</code> to skip the sign-in screen if time is tight. Do not
+     rehearse on the demo's UTC day — the Groq cap is ~7 calls. Keep <code>SAHAI_MOCK=1</code> ready
+     as a fallback: every path runs, nothing is billed, and the only visible difference is that costs
+     read zero.</p>
+</div>
+
+<h2 class="page-break">16 · Questions judges will ask</h2>
+
+<h4>"Is this just a wrapper around an LLM?"</h4>
+<p>No — and the ledger proves it. 185 of 652 pipeline stages cost nothing: retrieval is local ONNX
+   embeddings plus BM25, and six of eight guardrails are plain Python over the generated text. The
+   expensive model is invoked on roughly one turn in three, and only when a named code rule says the
+   turn earns it.</p>
+
+<h4>"How do you stop it hallucinating a fee?"</h4>
+<p>Three layers. Retrieval withholds source text entirely below a measured similarity floor. The
+   prompt is given only the retrieved chunks. Then <code>check_grounding</code> verifies every figure
+   verbatim against the cited chunk — in code, after generation — and blocks the suggestion if one is
+   unaccounted for. The agent sees which figures were traced, underlined in the sentence.</p>
+
+<h4>"What if the agent just clicks approve on everything?"</h4>
+<p>They cannot approve a message the guardrail rejected — the server refuses it, and the way past is a
+   rewrite. The rewrite is re-checked against the deterministic rules. The override is recorded in the
+   audit trace under the identity from their credential, which they cannot type.</p>
+
+<h4>"Why not use a frontier model and one good prompt?"</h4>
+<p>It costs 55× more for the same token volume, and that comparison is generous — it prices only the
+   tokens we actually spend, whereas a mega-prompt would carry the whole handbook every turn. More
+   importantly, a single prompt gives you no place to put a deterministic check. You cannot ask a
+   prompt to be un-promptable.</p>
+
+<h4>"Is the cost number real?"</h4>
+<p>Every row comes from the <code>usage</code> field of a real API response, priced by a table in the
+   repo and persisted per decision. Pull <code>/api/export/trace.csv</code> and sum the <code>usd</code>
+   column — it reproduces the figure exactly.</p>
+
+<h4>"What breaks first at scale?"</h4>
+<p>In-memory live-call state. One process is fine; multiple workers need Redis, and that is named in
+   the roadmap. After that, the CRM connector's latency budget — which is why SQLite remains the
+   system of record and the cloud mirrors are asynchronous.</p>
+
+<h2>17 · Glossary</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td class="mono">NBA</td><td>Next Best Action — the agent that writes the sentence to say</td></tr>
+  <tr><td class="mono">RRF</td><td>Reciprocal Rank Fusion — merges vector and BM25 rankings without normalising scores</td></tr>
+  <tr><td class="mono">tier</td><td>Which cost band a decision was routed to: none · tiny · cheap · standard · high · safety · stt</td></tr>
+  <tr><td class="mono">chunk_id</td><td>Stable identifier for a passage of the handbook, e.g. <code>objection-cost#0</code></td></tr>
+  <tr><td class="mono">grounded span</td><td>Character offsets of a figure in the suggestion that was traced to a cited chunk</td></tr>
+  <tr><td class="mono">send_status</td><td>The human-oversight state machine: <code>pending_agent_approval → approved → sent</code>, or <code>rejected</code></td></tr>
+  <tr><td class="mono">enforced_by</td><td><code>code</code> (deterministic, un-promptable) or <code>llm</code> (model judgement) — shown in the UI</td></tr>
+  <tr><td class="mono">principal</td><td>The authenticated identity behind a request: key, display name, role</td></tr>
+</table>
+
+<div class="box good" style="margin-top:22px">
+  <span class="t">The honest summary</span>
+  <p>Most of this system is not a language model. Retrieval is local. The guardrails that matter are
+     Python. The expensive model is invoked on roughly one turn in three, and only when a code rule
+     says the turn earns it. That is the whole design: <strong>spend intelligence where the stakes
+     are, and nowhere else.</strong> It is why the number is a third of a US cent, and why the safety
+     claims survive contact with a customer trying to break them.</p>
+</div>
+
+</body>
+</html>
