@@ -21,6 +21,7 @@ import ApprovalBand from "./components/ApprovalBand";
 import IdleState from "./components/IdleState";
 import LiveVoice from "./components/LiveVoice";
 import AudioUpload from "./components/AudioUpload";
+import CustomerRecord from "./components/CustomerRecord";
 
 /**
  * Layout is horizontal bands, not columns.
@@ -67,6 +68,9 @@ export default function App() {
   const [frontierUsd, setFrontierUsd] = useState(0);
   const [post, setPost] = useState<PostCallResult | null>(null);
   const [customerBefore, setCustomerBefore] = useState<Record<string, unknown> | null>(null);
+  /** Whose record the live view should show. */
+  const activeCustomerId =
+    detail?.customer_id ?? (kind === "voice" ? voiceCustomer : null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -346,6 +350,7 @@ export default function App() {
                   thinkingOn={thinking}
                 />
                 <div className="flex min-h-0 flex-col gap-3">
+                  <CustomerRecord customerId={activeCustomerId} />
                   <WhatThisUsed assist={latest} />
                   {kind === "voice" && selected && (
                     <>
