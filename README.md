@@ -470,3 +470,9 @@ Stated rather than hidden.
   account does not reset it.
 - **Speaker diarization is not implemented.** The phone path gets attribution
   from the carrier's separate tracks instead.
+
+---
+
+## License
+
+[MIT](LICENSE) © Subhash Vadaparthi
