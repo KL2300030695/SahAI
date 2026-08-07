@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMic, useSpeech } from "../lib/useMic";
 import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
 
-type Speaker = "customer" | "agent";
-
 export interface LiveVoiceHandle {
   turns: TranscriptTurn[];
   assists: TurnAssist[];
@@ -12,10 +10,25 @@ export interface LiveVoiceHandle {
 /**
  * Live microphone co-pilot.
  *
- * One microphone cannot separate the agent from the customer, and Whisper does
- * not diarise. Rather than guess, the UI asks who is speaking — and says so.
- * Getting attribution wrong would silently poison intent detection on every
- * later turn, which is worse than an explicit toggle.
+ * Microphone input is **always** attributed to the customer, and there is no
+ * per-utterance speaker control.
+ *
+ * An earlier version made the agent pick "customer" or "agent" before each
+ * utterance. That is unusable by construction: during a live call the agent is
+ * the one talking, so they cannot also be operating a toggle between sentences.
+ * An interaction that only works when nobody is on a call is not an
+ * interaction.
+ *
+ * The deeper limit is worth stating rather than designing around. On a real
+ * sales desk the agent wears a headset: the browser microphone hears the agent,
+ * and the customer's audio is on the phone line where the browser cannot reach
+ * it. So single-microphone capture cannot do two-party attribution at all — not
+ * with a better toggle, not with better VAD. It works for a speakerphone or a
+ * solo demo, and that is the honest scope.
+ *
+ * Real two-party separation is what the phone path is for: the carrier
+ * delivers each leg on its own labelled track, so attribution is exact and
+ * automatic. See `PhoneCall.tsx` and `app/telephony/twilio.py`.
  */
 export default function LiveVoice({
   callId,
@@ -30,14 +43,12 @@ export default function LiveVoice({
   onLedger: (l: CostLedger, frontier: number) => void;
   onEnd: () => void;
 }) {
-  const [speaker, setSpeaker] = useState<Speaker>("customer");
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [sttError, setSttError] = useState<string | null>(null);
   const [utterances, setUtterances] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [customerTurns, setCustomerTurns] = useState(0);
-  const [agentTurns, setAgentTurns] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const speech = useSpeech();
 
@@ -77,8 +88,7 @@ export default function LiveVoice({
           break;
         case "transcript":
           setStatus("");
-          if (msg.turn.speaker === "agent") setAgentTurns((n) => n + 1);
-          else setCustomerTurns((n) => n + 1);
+          setCustomerTurns((n) => n + 1);
           onTurn(msg.turn);
           break;
         case "transcript_skipped":
@@ -134,18 +144,17 @@ export default function LiveVoice({
   }, [callId]);
 
   // --- mic ------------------------------------------------------------
-  const handleUtterance = useCallback(
-    (blob: Blob, _ms: number) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ action: "speaker", speaker }));
-      blob.arrayBuffer().then((buf) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(buf);
-        setUtterances((n) => n + 1);
-      });
-    },
-    [speaker],
-  );
+  const handleUtterance = useCallback((blob: Blob, _ms: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Microphone input is always attributed to the customer. There is no
+    // per-utterance speaker choice, because during a live call the agent is
+    // speaking and cannot operate one -- see the note in the panel below.
+    blob.arrayBuffer().then((buf) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(buf);
+      setUtterances((n) => n + 1);
+    });
+  }, []);
 
   const mic = useMic({ onUtterance: handleUtterance });
 
@@ -192,68 +201,27 @@ export default function LiveVoice({
           </p>
         )}
 
-        {/* who is talking */}
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400">Currently speaking</span>
-            <span className="text-[10px] text-slate-600">
-              one mic can't separate voices
+        {/* what this mode can and cannot do */}
+        <div className="rounded border border-slate-800 bg-slate-950/60 px-2 py-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="chip bg-emerald-500/10 text-emerald-300 ring-emerald-500/30">
+              mic = customer
             </span>
+            <span className="text-[10px] text-slate-600">no toggle to operate</span>
           </div>
-          <div className="flex gap-1">
-            {(["customer", "agent"] as Speaker[]).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSpeaker(s)}
-                className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium capitalize transition ${
-                  speaker === s
-                    ? s === "customer"
-                      ? "bg-emerald-600 text-white"
-                      : "bg-slate-600 text-white"
-                    : "border border-slate-800 text-slate-400 hover:bg-slate-800"
-                }`}
-              >
-                {s}
-                {s === "customer" && (
-                  <span className="ml-1 opacity-70">· assists</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {speaker === "agent" ? (
-            <div className="mt-1.5 rounded border border-amber-800/50 bg-amber-950/30 px-2 py-1.5">
-              <p className="text-[11px] leading-snug text-amber-200/90">
-                <strong>Co-pilot is listening only.</strong> Agent turns are
-                recorded as context and produce no suggestion. Switch to{" "}
-                <button
-                  onClick={() => setSpeaker("customer")}
-                  className="underline hover:text-amber-100"
-                >
-                  Customer
-                </button>{" "}
-                to get assistance.
-              </p>
-            </div>
-          ) : (
-            <p className="mt-1 text-[10px] leading-snug text-slate-600">
-              Customer turns drive the pipeline; agent turns are context only.
-              Whisper does not diarise, so this is stated rather than guessed.
-            </p>
-          )}
-
-          {/* If everything so far is agent-side, the user has almost certainly
-              left the toggle wrong and is waiting for a suggestion that will
-              never come. Say so rather than sitting silent. */}
-          {agentTurns >= 2 && customerTurns === 0 && (
-            <div className="mt-1.5 rounded border border-rose-800/50 bg-rose-950/30 px-2 py-1.5">
-              <p className="text-[11px] leading-snug text-rose-200/90">
-                {agentTurns} turns captured, none marked as the customer — so
-                nothing has triggered the co-pilot yet. If you are demoing solo,
-                you are the customer.
-              </p>
-            </div>
-          )}
+          <p className="text-[11px] leading-snug text-slate-500">
+            Everything the microphone hears is treated as the customer, so you
+            never have to touch this while a call is running.
+          </p>
+          <p className="mt-1.5 text-[10px] leading-snug text-slate-600">
+            <strong className="text-slate-500">This mode assumes speakerphone
+            or a solo demo.</strong>{" "}
+            On a real desk the agent wears a headset — the browser would hear
+            the agent and never the customer, because the customer's audio is on
+            the phone line. Two-party separation needs the{" "}
+            <span className="text-indigo-400">Phone call</span> mode, where the
+            carrier delivers each party on its own track.
+          </p>
         </div>
 
         {/* level meter */}
@@ -334,7 +302,7 @@ export default function LiveVoice({
 
         <div className="flex justify-between border-t border-slate-800 pt-2 text-[10px] text-slate-600">
           <span>
-            {utterances} sent · {customerTurns} customer · {agentTurns} agent
+            {utterances} sent · {customerTurns} transcribed
             {skipped > 0 && (
               <span className="text-slate-500"> · {skipped} silence</span>
             )}
