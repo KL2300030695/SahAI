@@ -60,7 +60,16 @@ from app.crm.models import Call, Customer
 from app.llm.client import get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
-from app.schemas import Intent, ModelTier, Sentiment, Speaker, TranscriptTurn
+from app.guardrails import rules
+from app.schemas import (
+    CheckName,
+    CheckResult,
+    Intent,
+    ModelTier,
+    Sentiment,
+    Speaker,
+    TranscriptTurn,
+)
 from app.telemetry.cost import CostMeter
 from app.telephony.audio import UtteranceBuffer
 from app.telephony.twilio import (
@@ -1069,6 +1078,15 @@ class ApprovalBody(BaseModel):
     decision: str = "approve"  # approve | reject
 
 
+def _blocking_checks(call: Call) -> list[dict]:
+    """The post-call checks that did not pass, from the persisted trace."""
+    try:
+        trace = json.loads(call.guardrail_trace_json or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [c for c in trace if isinstance(c, dict) and not c.get("passed", True)]
+
+
 @app.post("/api/calls/{call_id}/approve")
 def approve(call_id: str, body: ApprovalBody) -> dict:
     """The human oversight gate.
@@ -1077,6 +1095,18 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
     or marks a follow-up sendable, and it requires a named approver. No agent
     can call it. An agent that decided a message was fine to send would still be
     stuck at `pending_agent_approval`.
+
+    It also refuses to send a message its own guardrail rejected. That sounds
+    obvious; it was not true. The post-call check ran, correctly caught a draft
+    claiming Pay-in-3 was entirely free with no mention of the late or bounce
+    fee, wrote the verdict to the trace — and this endpoint never read it. The
+    message went out marked `sent`. A guardrail nothing consumes is decoration,
+    so the verdict is now load-bearing here rather than only rendered.
+
+    The way past a block is to rewrite the message, not to click again. An edit
+    is re-checked against the deterministic rules and the override is recorded
+    in the trace under the approver's name, because the accountable act is a
+    human choosing to send different words, not a human dismissing a warning.
     """
     if not body.approver_id.strip():
         raise HTTPException(400, "approver_id is required — approvals are attributed")
@@ -1092,18 +1122,66 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
             call.approved_at = datetime.now(timezone.utc)
             return {"call_id": call_id, "send_status": "rejected"}
 
+        original = json.loads(call.followup_json or "{}")
+        original_body = (original.get("body") or "").strip()
+        edited_body = (
+            body.edited_followup_body.strip()
+            if body.edited_followup_body is not None
+            else None
+        )
+        rewritten = edited_body is not None and edited_body != original_body
+
+        # -- the gate -----------------------------------------------------
+        failures = _blocking_checks(call)
+        overrides: list[CheckResult] = []
+        if failures and original_body:
+            if not rewritten:
+                names = ", ".join(str(f.get("name", "check")) for f in failures)
+                detail = next(
+                    (f.get("detail") for f in failures if f.get("detail")), ""
+                )
+                raise HTTPException(
+                    400,
+                    f"Blocked by {names}: {detail} Rewrite the message before "
+                    f"sending it, or discard it.",
+                )
+
+            # A rewrite still has to clear the checks that are code, not
+            # judgement — a human is allowed to disagree with the model about
+            # tone, never to send a claim that an action already happened.
+            recheck = rules.check_no_fabricated_actions(edited_body or "")
+            if not recheck.passed:
+                raise HTTPException(400, f"Your edit still fails: {recheck.detail}")
+
+            overrides = [
+                CheckResult(
+                    name=CheckName(f["name"]),
+                    passed=True,
+                    enforced_by="code",
+                    detail=(
+                        f"Draft was blocked; {body.approver_id.strip()} rewrote the "
+                        f"message and sent their own wording."
+                    ),
+                )
+                for f in failures
+                if f.get("name") in {c.value for c in CheckName}
+            ]
+
         # Human edits win over the model's draft.
         if body.edited_summary is not None:
             call.summary = body.edited_summary
-        if body.edited_followup_body is not None:
-            fu = json.loads(call.followup_json or "{}")
-            if fu:
-                fu["body"] = body.edited_followup_body
-                call.followup_json = json.dumps(fu)
+        if edited_body is not None and original:
+            original["body"] = edited_body
+            call.followup_json = json.dumps(original)
 
         ok, message = apply_approved_patch(s, call_id, body.approver_id)
         if not ok:
             raise HTTPException(400, message)
+
+        if overrides:
+            trace = json.loads(call.guardrail_trace_json or "[]")
+            trace.extend(json.loads(c.model_dump_json()) for c in overrides)
+            call.guardrail_trace_json = json.dumps(trace)
 
         followup = json.loads(call.followup_json or "{}")
         if followup.get("body"):
@@ -1114,6 +1192,7 @@ def approve(call_id: str, body: ApprovalBody) -> dict:
             "send_status": call.send_status,
             "approved_by": call.approved_by,
             "crm_patch_applied": json.loads(call.crm_patch_json or "{}"),
+            "overrode": [c.name.value for c in overrides],
             "message": message,
         }
 

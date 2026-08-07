@@ -35,6 +35,21 @@ export default function ApprovalBand({
   const optedOut = crm.disposition === "not_interested";
   const patch = Object.entries(crm.crm_patch);
 
+  /**
+   * A failed post-call check belongs *in* the decision, not under it.
+   *
+   * This band once rendered "Approve and write" unconditionally while the
+   * verdict that rejected the message sat in a collapsed strip at the bottom of
+   * the page. A draft claiming Pay-in-3 was entirely free went out marked
+   * `sent`, with the check that caught it visible on the same screen. The
+   * server refuses that now; this is so the agent finds out before clicking
+   * rather than from a 400.
+   */
+  const failed = (result.guardrail?.checks ?? []).filter((c) => !c.passed);
+  const hasDraft = !!crm.followup_draft?.body;
+  const rewritten = body.trim() !== (crm.followup_draft?.body ?? "").trim();
+  const blocked = failed.length > 0 && hasDraft && !rewritten;
+
   async function send(decision: "approve" | "reject") {
     if (!approver.trim()) {
       setError("Your name — an approval nobody is named on isn't an approval.");
@@ -86,24 +101,61 @@ export default function ApprovalBand({
       {/* ---- the decision, at full weight ---- */}
       <section
         className="card px-7 py-6"
-        style={{ borderLeft: "3px solid var(--yourcall)" }}
+        style={{
+          borderLeft: `3px solid ${blocked ? "var(--halt)" : "var(--yourcall)"}`,
+        }}
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <span className="t-label">Your decision</span>
-          <span className="tag tag-yourcall">Nothing has been written yet</span>
+          <span className={`tag ${blocked ? "tag-halt" : "tag-yourcall"}`}>
+            {blocked ? "This message can't go out as written" : "Nothing has been written yet"}
+          </span>
         </div>
 
-        <p className="t-speech-sm max-w-3xl">
-          You're about to write this to {String(customerBefore?.name ?? "the customer")}'s
-          record{crm.followup_draft ? " and send them a message" : ""}.
-        </p>
-        <p
-          className="mt-2 max-w-2xl text-[12.5px] leading-relaxed"
-          style={{ color: "var(--graphite)" }}
-        >
-          The co-pilot can't do this itself — it can only propose. You're the
-          only thing that can write it.
-        </p>
+        {blocked ? (
+          <>
+            <p className="t-speech-sm max-w-3xl" style={{ color: "var(--halt)" }}>
+              I can't let this message go out.
+            </p>
+            <ul className="mt-3 max-w-2xl space-y-2">
+              {failed.map((c, i) => (
+                <li key={i} className="text-[13px] leading-relaxed">
+                  <span className="t-data" style={{ color: "var(--halt)" }}>
+                    {c.name.replace(/_/g, " ")}
+                  </span>
+                  <span className="ml-2 tag">{c.enforced_by}</span>
+                  <span className="mt-1 block" style={{ color: "var(--graphite)" }}>
+                    {c.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p
+              className="mt-3 max-w-2xl text-[12.5px] leading-relaxed"
+              style={{ color: "var(--ink)" }}
+            >
+              Rewrite the message below and it becomes yours to send — your name
+              goes on the wording, and the change is recorded. The record note
+              and CRM changes are unaffected; you can also discard the whole
+              thing.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="t-speech-sm max-w-3xl">
+              You're about to write this to{" "}
+              {String(customerBefore?.name ?? "the customer")}'s record
+              {crm.followup_draft ? " and send them a message" : ""}.
+            </p>
+            <p
+              className="mt-2 max-w-2xl text-[12.5px] leading-relaxed"
+              style={{ color: "var(--graphite)" }}
+            >
+              The co-pilot can't do this itself — it can only propose. You're the
+              only thing that can write it.
+            </p>
+          </>
+        )}
 
         <div className="mt-5 flex flex-wrap items-end gap-3">
           <div>
@@ -120,10 +172,19 @@ export default function ApprovalBand({
           </div>
           <button
             onClick={() => send("approve")}
-            disabled={busy}
+            disabled={busy || blocked}
             className="btn btn-primary"
+            title={
+              blocked
+                ? "Rewrite the flagged message first — the server refuses this too"
+                : undefined
+            }
           >
-            {busy ? "Writing…" : "Approve and write"}
+            {busy
+              ? "Writing…"
+              : blocked
+                ? "Rewrite the message first"
+                : "Approve and write"}
           </button>
           <button
             onClick={() => send("reject")}
@@ -287,8 +348,14 @@ export default function ApprovalBand({
               style={{ borderColor: "var(--hairline)" }}
             >
               <span className="t-label">Message to send</span>
-              {crm.followup_timing !== "none" && (
-                <span className="tag">{crm.followup_timing.replace(/_/g, " ")}</span>
+              {blocked ? (
+                <span className="tag tag-halt">needs a rewrite</span>
+              ) : rewritten && failed.length > 0 ? (
+                <span className="tag tag-verified">your wording</span>
+              ) : (
+                crm.followup_timing !== "none" && (
+                  <span className="tag">{crm.followup_timing.replace(/_/g, " ")}</span>
+                )
               )}
             </header>
             <div className="p-4">
