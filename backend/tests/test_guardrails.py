@@ -294,6 +294,15 @@ class TestFabricatedActions:
             "Check your inbox for the link.",
             "It's on its way to you now.",
             "I just sent you an SMS.",
+            # Found by watching a live run — record-keeping verbs are as much a
+            # false promise as "sent", because the CRM patch is still pending.
+            "I've marked you as do-not-call.",
+            "I have noted your preference.",
+            "I've recorded that for you.",
+            "We've updated your account.",
+            "Your details have been recorded.",
+            "You're all set.",
+            "I've opted you out.",
         ],
     )
     def test_completed_action_claims_are_blocked(self, text):
@@ -307,6 +316,9 @@ class TestFabricatedActions:
             "You'll see your limit in the app once KYC is complete.",
             "There's a ₹250 late fee if an instalment is missed.",
             "Would it help if I sent the details in writing?",
+            "I'll note that and we won't reach out further.",
+            "I'll mark you as do-not-call before I close this.",
+            "Let me record that for you now.",
         ],
     )
     def test_future_and_offered_actions_are_fine(self, text):

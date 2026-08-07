@@ -303,16 +303,26 @@ def check_stale_terms(
 # details and your account info. Please check your inbox."
 #
 # The prompt now forbids this, but a prompt is a request. This is the check.
+_COMPLETION_VERBS = (
+    "sent|emailed|texted|messaged|shared|updated|processed|submitted|applied|"
+    "activated|approved|booked|added|scheduled|arranged|"
+    # Found by watching a live run: the model wrote "I've marked you as
+    # do-not-call" while the CRM patch was still pending_agent_approval.
+    # Record-keeping verbs are exactly as much of a false promise as "sent" --
+    # the customer believes something is on file when nothing has been written.
+    "marked|noted|recorded|flagged|logged|registered|removed|cancelled|"
+    "canceled|deleted|disabled|enabled|set\\s+up|opted\\s+you\\s+out"
+)
+
 _COMPLETED_ACTION = re.compile(
     r"\b(?:"
-    r"i(?:'ve| have)\s+(?:just\s+)?(?:sent|emailed|texted|messaged|shared|"
-    r"updated|processed|submitted|applied|activated|approved|booked|added|"
-    r"scheduled|arranged)"
+    rf"i(?:'ve| have)\s+(?:just\s+|already\s+)?(?:{_COMPLETION_VERBS})"
+    rf"|we(?:'ve| have)\s+(?:just\s+|already\s+)?(?:{_COMPLETION_VERBS})"
     r"|(?:i|we)\s+(?:just\s+)?sent\s+you"
-    r"|(?:has|have)\s+been\s+(?:sent|emailed|updated|processed|activated|"
-    r"submitted|approved)"
+    rf"|(?:has|have)\s+been\s+(?:{_COMPLETION_VERBS})"
     r"|check\s+your\s+(?:inbox|email|messages|sms)"
-    r"|it(?:'s| is)\s+(?:on\s+its\s+way|been\s+sent)"
+    r"|it(?:'s| is)\s+(?:on\s+its\s+way|been\s+sent|done)"
+    r"|you(?:'re| are)\s+(?:now\s+)?(?:all\s+set|signed\s+up|registered)"
     r")\b",
     re.IGNORECASE,
 )
