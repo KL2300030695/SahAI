@@ -98,6 +98,11 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
         checks.append(
             rules.check_grounding(redaction.text, inp.cited_chunk_ids, inp.citations)
         )
+        # Same computation the check just ran, kept rather than discarded, so
+        # the interface can mark sourced figures inside the sentence itself.
+        grounded_spans, _ = rules.ground_figures(
+            redaction.text, inp.cited_chunk_ids, inp.citations
+        )
         checks.append(
             rules.check_stale_terms(
                 inp.citations, inp.cited_chunk_ids, dropped_stale=dropped_stale
@@ -125,6 +130,7 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
                 passed=False,
                 checks=checks,
                 redacted_say=redaction.text,
+                grounded_spans=grounded_spans,
                 blocked_reason="; ".join(f"{c.name.value}: {c.detail}" for c in code_blocked),
             )
 
@@ -148,7 +154,12 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
                     severity=Severity.INFO,
                 )
             )
-            return CheckOut(passed=True, checks=checks, redacted_say=redaction.text)
+            return CheckOut(
+                passed=True,
+                checks=checks,
+                redacted_say=redaction.text,
+                grounded_spans=grounded_spans,
+            )
 
         tier = route_selfcheck(escalated, inp.stage)
         excerpts = "\n\n---\n\n".join(
@@ -208,6 +219,7 @@ Review it. Respond with JSON only."""
             passed=not blocking,
             checks=checks,
             redacted_say=redaction.text,
+            grounded_spans=grounded_spans,
             blocked_reason=(
                 "; ".join(f"{c.name.value}: {c.detail}" for c in blocking)
                 if blocking

@@ -72,6 +72,10 @@ export const api = {
   },
 
   customers: () => fetch("/api/customers").then(json<any[]>),
+
+  /** The record as it stands, so approval can show before → after. */
+  customer: (id: string) =>
+    fetch(`/api/customers/${id}`).then(json<Record<string, unknown>>),
 };
 
 export function openCallSocket(callId: string): WebSocket {

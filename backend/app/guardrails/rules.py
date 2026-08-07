@@ -25,6 +25,7 @@ from app.schemas import (
     CheckName,
     CheckResult,
     Citation,
+    GroundedSpan,
     Severity,
 )
 
@@ -38,22 +39,97 @@ _DURATION = re.compile(
     r"\b\d+\s?(?:day|days|month|months|week|weeks|year|years|hour|hours|minute|minutes)\b",
     re.IGNORECASE,
 )
-_BARE_NUMBER = re.compile(r"(?<![\w#/.-])\d{3,}(?![\w/.-])")
+# Comma grouping has to be part of the pattern, not left to the tokeniser. An
+# earlier version matched "60,000" as the bare number "000" -- it started after
+# the comma, because a comma was not in the lookbehind. That made a correctly
+# sourced figure look ungrounded and blocked a good suggestion.
+#
+# The group alternative accepts both Western (60,000) and Indian (1,50,000)
+# digit grouping.
+_BARE_NUMBER = re.compile(
+    r"(?<![\w#/.,-])(?:\d{1,3}(?:,\d{2,3})+|\d{3,})(?![\w/.,-]*\d)"
+)
 
 # Numbers that are safe without a citation: they are structural to the product
 # name, not quotable terms.
 _ALLOWED_NUMERIC_LITERALS = {"3", "three", "1", "2"}
 
 
-def _numeric_claims(text: str) -> list[str]:
-    claims: list[str] = []
+def _numeric_spans(text: str) -> list[tuple[str, int, int]]:
+    """Every quotable figure with its position, longest match winning.
+
+    Positions matter now: the interface marks sourced figures inside the
+    sentence, so it needs offsets, not just values. Overlaps are resolved
+    longest-first so "₹12,000" is one span rather than a money match sitting on
+    top of a bare-number match.
+    """
+    found: list[tuple[str, int, int]] = []
     for pattern in (_MONEY, _PERCENT, _DURATION, _BARE_NUMBER):
-        claims.extend(m.group(0).strip() for m in pattern.finditer(text or ""))
-    return [c for c in claims if c.lower() not in _ALLOWED_NUMERIC_LITERALS]
+        for m in pattern.finditer(text or ""):
+            if m.group(0).strip().lower() in _ALLOWED_NUMERIC_LITERALS:
+                continue
+            found.append((m.group(0).strip(), m.start(), m.end()))
+
+    found.sort(key=lambda s: (s[1] - s[2], s[1]))  # longest first, then position
+    kept: list[tuple[str, int, int]] = []
+    for span in found:
+        if not any(span[1] < k[2] and k[1] < span[2] for k in kept):
+            kept.append(span)
+    return sorted(kept, key=lambda s: s[1])
+
+
+def _numeric_claims(text: str) -> list[str]:
+    return [t for t, _, _ in _numeric_spans(text)]
 
 
 def _normalise_number(s: str) -> str:
     return re.sub(r"[^\d]", "", s or "")
+
+
+def ground_figures(
+    say: str, cited_chunk_ids: Iterable[str], citations: list[Citation]
+) -> tuple[list[GroundedSpan], list[str]]:
+    """Map each figure in `say` to the cited chunk that contains it.
+
+    Returns (grounded spans, ungrounded figure text). This is the single source
+    of truth for both the guardrail verdict and the interface's inline marks, so
+    the two can never disagree about what is sourced.
+    """
+    by_id = {c.chunk_id: c for c in citations}
+    cited = [cid for cid in (cited_chunk_ids or []) if cid in by_id]
+
+    # Which numbers each cited chunk actually contains.
+    chunk_numbers: dict[str, set[str]] = {
+        cid: {
+            _normalise_number(n)
+            for n in _numeric_claims(by_id[cid].text)
+            if _normalise_number(n)
+        }
+        for cid in cited
+    }
+
+    grounded: list[GroundedSpan] = []
+    ungrounded: list[str] = []
+    for text, start, end in _numeric_spans(say):
+        digits = _normalise_number(text)
+        if not digits:
+            continue
+        source = next((cid for cid in cited if digits in chunk_numbers[cid]), None)
+        if source is None:
+            ungrounded.append(text)
+            continue
+        c = by_id[source]
+        grounded.append(
+            GroundedSpan(
+                text=text,
+                start=start,
+                end=end,
+                chunk_id=source,
+                doc_title=c.title,
+                version=c.version,
+            )
+        )
+    return grounded, ungrounded
 
 
 # ---------------------------------------------------------------------------
@@ -91,11 +167,8 @@ def check_grounding(
     text — no judgement call, no second model, just set membership.
     """
     cited = set(cited_chunk_ids or [])
-    by_id = {c.chunk_id: c for c in citations}
-    corpus = " ".join(by_id[cid].text for cid in cited if cid in by_id)
-    corpus_digits = {_normalise_number(n) for n in _numeric_claims(corpus)}
-
     claims = _numeric_claims(say)
+
     if not claims:
         return CheckResult(
             name=CheckName.GROUNDING,
@@ -117,11 +190,7 @@ def check_grounding(
             severity=Severity.BLOCK,
         )
 
-    ungrounded = [
-        c
-        for c in claims
-        if _normalise_number(c) and _normalise_number(c) not in corpus_digits
-    ]
+    grounded, ungrounded = ground_figures(say, cited, citations)
     if ungrounded:
         return CheckResult(
             name=CheckName.GROUNDING,
@@ -138,8 +207,8 @@ def check_grounding(
         name=CheckName.GROUNDING,
         passed=True,
         detail=(
-            f"All {len(claims)} figure(s) traced to cited chunk(s): "
-            f"{', '.join(sorted(cited))}."
+            f"All {len(grounded)} figure(s) traced to cited chunk(s): "
+            f"{', '.join(sorted({g.chunk_id for g in grounded}))}."
         ),
         enforced_by="code",
         severity=Severity.BLOCK,

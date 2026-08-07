@@ -5,10 +5,12 @@ import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
 /**
  * Upload a recorded clip and run it through the full pipeline.
  *
- * The fallback when a microphone is unavailable — a locked-down laptop, a
- * conference room, a browser without MediaRecorder — and the path for analysing
- * an already-recorded call. Same consent gate, same orchestrator, same
- * guardrails as the live socket.
+ * The fallback when a microphone isn't available — a locked-down laptop, a
+ * noisy room, a browser without MediaRecorder — and the path for reviewing an
+ * already-recorded call. Same consent gate, same guardrails as the live socket.
+ *
+ * This one keeps a speaker choice, unlike the microphone: picking a file is a
+ * deliberate act, and nobody is mid-sentence while doing it.
  */
 export default function AudioUpload({
   callId,
@@ -37,8 +39,7 @@ export default function AudioUpload({
       onLedger(r.ledger, r.frontier_usd ?? 0);
       setLast({
         seconds: r.audio_seconds,
-        // whisper-large-v3-turbo bills $0.04 per hour of audio
-        usd: (r.audio_seconds / 3600) * 0.04,
+        usd: (r.audio_seconds / 3600) * 0.04, // whisper-large-v3-turbo
       });
     } catch (e: any) {
       setError(String(e.message ?? e));
@@ -49,24 +50,29 @@ export default function AudioUpload({
   }
 
   return (
-    <div className="panel">
-      <div className="panel-title">Audio upload</div>
-      <div className="space-y-2.5 px-3 py-3">
-        <p className="text-[11px] leading-snug text-slate-500">
-          Drop a recorded clip in. It is transcribed with Whisper and run through
-          the same pipeline as a live turn.
-        </p>
+    <section className="card overflow-hidden">
+      <header
+        className="border-b px-4 py-2.5"
+        style={{ borderColor: "var(--hairline)" }}
+      >
+        <span className="t-label">Or drop in a recording</span>
+      </header>
 
-        <div className="flex gap-1">
+      <div className="space-y-3 p-4">
+        <div className="flex gap-1.5">
           {(["customer", "agent"] as const).map((s) => (
             <button
               key={s}
               onClick={() => setSpeaker(s)}
-              className={`flex-1 rounded px-2 py-1 text-[11px] font-medium capitalize transition ${
+              className="btn flex-1 capitalize"
+              style={
                 speaker === s
-                  ? "bg-sky-600 text-white"
-                  : "border border-slate-800 text-slate-400 hover:bg-slate-800"
-              }`}
+                  ? { background: "var(--ink)", color: "var(--surface)" }
+                  : {
+                      border: "1px solid var(--hairline)",
+                      color: "var(--graphite)",
+                    }
+              }
             >
               {s}
             </button>
@@ -82,27 +88,28 @@ export default function AudioUpload({
             const f = e.target.files?.[0];
             if (f) handle(f);
           }}
-          className="w-full cursor-pointer rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-[11px] text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-800 file:px-2 file:py-1 file:text-[11px] file:text-slate-200 hover:file:bg-slate-700 disabled:opacity-40"
+          className="card w-full px-3 py-2 text-[12.5px]"
         />
 
         {busy && (
-          <p className="text-[11px] text-sky-400">Transcribing and analysing…</p>
+          <p className="text-[12.5px]" style={{ color: "var(--graphite)" }}>
+            Writing it down and reading it…
+          </p>
         )}
         {error && (
-          <p className="rounded border border-rose-900/50 bg-rose-950/30 px-2 py-1.5 text-[11px] text-rose-200/80">
+          <p
+            className="rounded-md px-3 py-2 text-[12.5px]"
+            style={{ background: "var(--halt-wash)", color: "var(--halt)" }}
+          >
             {error}
           </p>
         )}
         {last && !busy && (
-          <p className="text-[10px] text-slate-600">
-            {last.seconds.toFixed(1)}s of audio · ${last.usd.toFixed(6)} to
-            transcribe
+          <p className="t-data" style={{ color: "var(--graphite)" }}>
+            {last.seconds.toFixed(1)}s · ${last.usd.toFixed(6)}
           </p>
         )}
-        <p className="text-[10px] leading-snug text-slate-600">
-          wav · mp3 · m4a · webm · ogg · flac — $0.04 per hour of audio
-        </p>
       </div>
-    </div>
+    </section>
   );
 }

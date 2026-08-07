@@ -383,11 +383,35 @@ class CheckIn(BaseModel):
     )
 
 
+class GroundedSpan(BaseModel):
+    """One figure in a suggestion, tied to the chunk it came from.
+
+    The grounding check already had to work this out to do its job; it simply
+    threw it away and returned a boolean. Keeping it lets the interface mark
+    sourced figures inside the sentence the agent is about to say, which turns
+    a check that silently passes into the most visible thing in the product.
+
+    Offsets index the REDACTED text — the string actually displayed.
+    """
+
+    text: str
+    start: int
+    end: int
+    chunk_id: str
+    doc_title: str = ""
+    version: str = ""
+
+
 class CheckOut(BaseModel):
     passed: bool = True
     checks: list[CheckResult] = Field(default_factory=list)
     redacted_say: Optional[str] = None
     blocked_reason: Optional[str] = None
+    grounded_spans: list[GroundedSpan] = Field(
+        default_factory=list,
+        description="Figures traced to a cited chunk, with offsets into "
+        "`redacted_say` so the UI can mark them in place.",
+    )
 
     @property
     def blocking_failures(self) -> list[CheckResult]:

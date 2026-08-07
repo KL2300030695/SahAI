@@ -2,33 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMic, useSpeech } from "../lib/useMic";
 import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
 
-export interface LiveVoiceHandle {
-  turns: TranscriptTurn[];
-  assists: TurnAssist[];
-}
-
 /**
- * Live microphone co-pilot.
+ * Live microphone.
  *
  * Microphone input is **always** attributed to the customer, and there is no
- * per-utterance speaker control.
+ * per-utterance speaker control. An earlier version made the agent pick before
+ * each utterance, which is unusable by construction: during a live call the
+ * agent is the one talking, so they cannot also be operating a toggle between
+ * sentences.
  *
- * An earlier version made the agent pick "customer" or "agent" before each
- * utterance. That is unusable by construction: during a live call the agent is
- * the one talking, so they cannot also be operating a toggle between sentences.
- * An interaction that only works when nobody is on a call is not an
- * interaction.
- *
- * The deeper limit is worth stating rather than designing around. On a real
- * sales desk the agent wears a headset: the browser microphone hears the agent,
- * and the customer's audio is on the phone line where the browser cannot reach
- * it. So single-microphone capture cannot do two-party attribution at all — not
- * with a better toggle, not with better VAD. It works for a speakerphone or a
- * solo demo, and that is the honest scope.
- *
- * Real two-party separation is what the phone path is for: the carrier
- * delivers each leg on its own labelled track, so attribution is exact and
- * automatic. See `PhoneCall.tsx` and `app/telephony/twilio.py`.
+ * The deeper limit is stated rather than designed around. On a real desk the
+ * agent wears a headset — the browser hears the agent, and the customer is on
+ * the phone line where the browser cannot reach them. Single-microphone capture
+ * cannot do two-party attribution at all. It is honest for a speakerphone or a
+ * solo demo; the phone path is what works on a real desk.
  */
 export default function LiveVoice({
   callId,
@@ -44,23 +31,16 @@ export default function LiveVoice({
   onEnd: () => void;
 }) {
   const [connected, setConnected] = useState(false);
-  const [status, setStatus] = useState<string>("");
+  const [status, setStatus] = useState("");
   const [sttError, setSttError] = useState<string | null>(null);
-  const [utterances, setUtterances] = useState(0);
+  const [sent, setSent] = useState(0);
+  const [heard, setHeard] = useState(0);
   const [skipped, setSkipped] = useState(0);
-  const [customerTurns, setCustomerTurns] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const speech = useSpeech();
 
-  // --- socket ---------------------------------------------------------
   useEffect(() => {
-    // `cancelled` guards against React 18 StrictMode, which in development
-    // mounts, unmounts and remounts every effect. Without it the first
-    // socket's teardown handlers write state that belongs to the socket that
-    // replaced it -- which surfaced as a permanent "connection dropped" banner
-    // on a connection that was in fact healthy.
     let cancelled = false;
-
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws/live/${callId}`);
     ws.binaryType = "arraybuffer";
@@ -69,58 +49,49 @@ export default function LiveVoice({
     ws.onopen = () => {
       if (cancelled) return;
       setConnected(true);
-      setSttError(null); // clear anything stale from a previous attempt
+      setSttError(null);
     };
-    ws.onclose = () => {
-      if (!cancelled) setConnected(false);
-    };
-    ws.onerror = () => {
-      if (!cancelled) setSttError("Connection to the co-pilot dropped.");
-    };
+    ws.onclose = () => !cancelled && setConnected(false);
+    ws.onerror = () =>
+      !cancelled && setSttError("Lost the connection to the co-pilot.");
+
     ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      switch (msg.type) {
+      const m = JSON.parse(ev.data);
+      switch (m.type) {
         case "ready":
-          setStatus(`ready · ${msg.stt_model}`);
+          setStatus("");
           break;
         case "transcribing":
-          setStatus("transcribing…");
+          setStatus("writing that down…");
           break;
         case "transcript":
           setStatus("");
-          setCustomerTurns((n) => n + 1);
-          onTurn(msg.turn);
+          setHeard((n) => n + 1);
+          onTurn(m.turn);
           break;
         case "transcript_skipped":
-          // Whisper answered silence with filler; it never reaches history.
           setSkipped((n) => n + 1);
-          setStatus("no speech — skipped");
+          setStatus("that was silence — skipped");
           break;
         case "thinking":
-          setStatus("analysing…");
+          setStatus("reading it…");
           break;
         case "assist":
           setStatus("");
-          onAssist(msg.assist);
-          if (msg.assist?.nba?.say && !msg.assist.blocked) {
-            speech.speak(msg.assist.nba.say);
-          }
+          onAssist(m.assist);
+          if (m.assist?.nba?.say && !m.assist.blocked) speech.speak(m.assist.nba.say);
           break;
         case "ledger":
-          onLedger(msg.ledger, msg.frontier_usd ?? 0);
+          onLedger(m.ledger, m.frontier_usd ?? 0);
           break;
         case "stt_error":
-          setSttError(msg.message);
+          setSttError(m.message);
           break;
         case "blocked":
-          // Live-call sessions are held in memory, so a backend restart drops
-          // them. That is a real limitation (noted in ARCHITECTURE.md), but it
-          // reads as a mysterious failure unless the message says what to do.
           setSttError(
-            msg.reason === "consent_not_recorded"
-              ? "This call session no longer exists — the backend restarted. " +
-                "Go back and start a new voice call."
-              : (msg.message ?? msg.reason),
+            m.reason === "consent_not_recorded"
+              ? "This call no longer exists — the server restarted. Start a new one."
+              : (m.message ?? m.reason),
           );
           break;
       }
@@ -128,155 +99,115 @@ export default function LiveVoice({
 
     return () => {
       cancelled = true;
-      // Closing a socket that is still CONNECTING makes the browser fire an
-      // `error` event. Under StrictMode that happens on every mount, so
-      // closing naively produced a spurious error banner every single time.
-      // Wait for the handshake, then close.
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      } else if (ws.readyState === WebSocket.CONNECTING) {
+      // Closing a CONNECTING socket makes the browser fire an error event.
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+      else if (ws.readyState === WebSocket.CONNECTING)
         ws.addEventListener("open", () => ws.close());
-      }
     };
-    // callId is the identity of this session; re-running on callbacks would
-    // tear down a live socket mid-call.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callId]);
 
-  // --- mic ------------------------------------------------------------
-  const handleUtterance = useCallback((blob: Blob, _ms: number) => {
+  const handleUtterance = useCallback((blob: Blob) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Microphone input is always attributed to the customer. There is no
-    // per-utterance speaker choice, because during a live call the agent is
-    // speaking and cannot operate one -- see the note in the panel below.
     blob.arrayBuffer().then((buf) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(buf);
-      setUtterances((n) => n + 1);
+      setSent((n) => n + 1);
     });
   }, []);
 
   const mic = useMic({ onUtterance: handleUtterance });
-
-  function endCall() {
-    mic.stop();
-    speech.cancel();
-    wsRef.current?.send(JSON.stringify({ action: "end" }));
-    onEnd();
-  }
-
-  const levelPct = Math.min(100, Math.round(mic.level * 900));
+  const level = Math.min(100, Math.round(mic.level * 900));
 
   return (
-    <div className="panel border-sky-900/50">
-      <div className="panel-title flex items-center justify-between border-sky-900/50">
-        <span className="text-sky-400">Live microphone</span>
-        <span
-          className={`chip ${
-            connected
-              ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30"
-              : "bg-slate-700/40 text-slate-400 ring-slate-600"
-          }`}
-        >
-          {connected ? "connected" : "connecting…"}
+    <section className="card overflow-hidden">
+      <header
+        className="flex items-center justify-between border-b px-4 py-2.5"
+        style={{ borderColor: "var(--hairline)" }}
+      >
+        <span className="t-label">Microphone</span>
+        <span className={`tag ${connected ? "tag-verified" : ""}`}>
+          {connected ? "listening" : "connecting…"}
         </span>
-      </div>
+      </header>
 
-      <div className="space-y-3 px-3 py-3">
+      <div className="space-y-3 p-4">
+        {(mic.error || sttError) && (
+          <p
+            className="rounded-md px-3 py-2 text-[12.5px]"
+            style={{ background: "var(--halt-wash)", color: "var(--halt)" }}
+          >
+            {mic.error ?? sttError}
+          </p>
+        )}
         {!mic.supported && (
-          <p className="rounded border border-amber-800/50 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-200/80">
-            This browser has no MediaRecorder support. Use the audio-upload tab,
-            or Chrome/Edge.
+          <p
+            className="rounded-md px-3 py-2 text-[12.5px]"
+            style={{ background: "var(--yourcall-wash)", color: "var(--yourcall)" }}
+          >
+            This browser can't record. Use the upload box below, or Chrome.
           </p>
         )}
 
-        {mic.error && (
-          <p className="rounded border border-rose-900/50 bg-rose-950/30 px-2 py-1.5 text-[11px] text-rose-200/80">
-            {mic.error}
-          </p>
-        )}
-        {sttError && (
-          <p className="rounded border border-rose-900/50 bg-rose-950/30 px-2 py-1.5 text-[11px] text-rose-200/80">
-            {sttError}
-          </p>
-        )}
-
-        {/* what this mode can and cannot do */}
-        <div className="rounded border border-slate-800 bg-slate-950/60 px-2 py-2">
-          <div className="mb-1 flex items-center gap-1.5">
-            <span className="chip bg-emerald-500/10 text-emerald-300 ring-emerald-500/30">
-              mic = customer
-            </span>
-            <span className="text-[10px] text-slate-600">no toggle to operate</span>
-          </div>
-          <p className="text-[11px] leading-snug text-slate-500">
-            Everything the microphone hears is treated as the customer, so you
-            never have to touch this while a call is running.
-          </p>
-          <p className="mt-1.5 text-[10px] leading-snug text-slate-600">
-            <strong className="text-slate-500">This mode assumes speakerphone
-            or a solo demo.</strong>{" "}
-            On a real desk the agent wears a headset — the browser would hear
-            the agent and never the customer, because the customer's audio is on
-            the phone line. Two-party separation needs the{" "}
-            <span className="text-indigo-400">Phone call</span> mode, where the
-            carrier delivers each party on its own track.
-          </p>
-        </div>
-
-        {/* level meter */}
+        {/* input level */}
         <div>
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400">Input level</span>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="t-label">Input</span>
             <span
-              className={`text-[10px] ${
-                mic.speaking ? "text-emerald-400" : "text-slate-600"
-              }`}
+              className="text-[11px]"
+              style={{ color: mic.speaking ? "var(--verified)" : "var(--graphite)" }}
             >
-              {mic.speaking ? "speech detected" : "silence"}
+              {mic.speaking ? "hearing speech" : "quiet"}
             </span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+          <div
+            className="h-1.5 overflow-hidden rounded-full"
+            style={{ background: "var(--hairline)" }}
+          >
             <div
-              className={`h-full rounded-full transition-[width] duration-75 ${
-                mic.speaking ? "bg-emerald-400" : "bg-slate-600"
-              }`}
-              style={{ width: `${levelPct}%` }}
+              className="h-full rounded-full"
+              style={{
+                width: `${level}%`,
+                background: mic.speaking ? "var(--verified)" : "var(--graphite)",
+                transition: "width 80ms linear",
+              }}
             />
           </div>
           {status && (
-            <p className="mt-1 text-[10px] text-sky-400/80">{status}</p>
+            <p className="mt-1.5 text-[11.5px]" style={{ color: "var(--graphite)" }}>
+              {status}
+            </p>
           )}
         </div>
 
-        {/* controls */}
         <div className="flex gap-2">
           {!mic.recording ? (
             <button
               onClick={mic.start}
               disabled={!mic.supported || !connected}
-              className="flex-1 rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
+              className="btn btn-primary flex-1"
             >
-              ● Start listening
+              Start listening
             </button>
           ) : (
-            <button
-              onClick={mic.stop}
-              className="flex-1 rounded bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-500"
-            >
-              ■ Pause
+            <button onClick={mic.stop} className="btn btn-quiet flex-1">
+              Pause
             </button>
           )}
           <button
-            onClick={endCall}
-            className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800"
+            onClick={() => {
+              mic.stop();
+              speech.cancel();
+              wsRef.current?.send(JSON.stringify({ action: "end" }));
+              onEnd();
+            }}
+            className="btn btn-quiet"
           >
-            End call
+            End
           </button>
         </div>
 
-        {/* spoken suggestions */}
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5">
+        <label className="flex cursor-pointer items-start gap-2.5">
           <input
             type="checkbox"
             checked={speech.enabled}
@@ -285,31 +216,31 @@ export default function LiveVoice({
               speech.setEnabled(e.target.checked);
               if (!e.target.checked) speech.cancel();
             }}
-            className="mt-0.5 accent-sky-500"
+            className="mt-0.5"
           />
-          <span className="text-[11px] leading-snug text-slate-400">
-            Read suggestions aloud
-            {speech.speaking && (
-              <span className="ml-1 text-emerald-400">· speaking</span>
-            )}
-            <span className="block text-[10px] text-slate-600">
-              {speech.supported
-                ? "Browser speech synthesis — no extra cost or latency. Use an earpiece."
-                : "Not supported in this browser."}
+          <span className="text-[12.5px] leading-snug">
+            Read lines to me
+            <span className="block text-[11.5px]" style={{ color: "var(--graphite)" }}>
+              Use an earpiece — the customer must not hear it.
             </span>
           </span>
         </label>
 
-        <div className="flex justify-between border-t border-slate-800 pt-2 text-[10px] text-slate-600">
-          <span>
-            {utterances} sent · {customerTurns} transcribed
-            {skipped > 0 && (
-              <span className="text-slate-500"> · {skipped} silence</span>
-            )}
-          </span>
-          <span>segmented on ~900ms silence</span>
-        </div>
+        {/* scope note — this is a real limitation, stated */}
+        <p
+          className="border-t pt-3 text-[11.5px] leading-relaxed"
+          style={{ borderColor: "var(--hairline)", color: "var(--graphite)" }}
+        >
+          Everything the mic hears is treated as the customer, so there's nothing
+          to operate mid-call. This assumes speakerphone or a solo run — on a
+          headset the browser hears you, not them. Use the phone line for a real
+          two-party call.
+        </p>
+
+        <p className="t-data" style={{ color: "var(--graphite)" }}>
+          {sent} sent · {heard} heard{skipped > 0 && ` · ${skipped} silence`}
+        </p>
       </div>
-    </div>
+    </section>
   );
 }

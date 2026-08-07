@@ -65,11 +65,23 @@ export interface CheckResult {
   severity: "info" | "warn" | "block";
 }
 
+/** A figure in the Say Line, tied to the chunk it came from.
+ *  Offsets index the redacted text — the string actually displayed. */
+export interface GroundedSpan {
+  text: string;
+  start: number;
+  end: number;
+  chunk_id: string;
+  doc_title: string;
+  version: string;
+}
+
 export interface CheckOut {
   passed: boolean;
   checks: CheckResult[];
   redacted_say: string | null;
   blocked_reason: string | null;
+  grounded_spans: GroundedSpan[];
 }
 
 export interface TurnAssist {

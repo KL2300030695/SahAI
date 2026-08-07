@@ -5,9 +5,7 @@ import { useSpeech } from "../lib/useMic";
 interface TelephonyConfig {
   ready: boolean;
   voice_webhook: string | null;
-  stream_url: string | null;
   signature_verification: boolean;
-  default_customer_id: string;
   hint: string;
 }
 
@@ -20,13 +18,16 @@ interface ActiveCall {
 }
 
 /**
- * Real phone calls.
+ * The phone line.
  *
  * The carrier drives the pipeline over its own socket; the dashboard *observes*
- * rather than driving. That split is why this component connects to
- * `/ws/observe/{id}` instead of sending anything — the agent's browser is not in
- * the audio path at all, which is what makes this work when the agent is on a
- * desk phone or a softphone rather than in the browser.
+ * rather than driving. That split is why this connects to `/ws/observe/{id}`
+ * and sends nothing — the agent's browser is not in the audio path at all,
+ * which is what makes it work when the agent is on a desk phone.
+ *
+ * It is also the only path with exact speaker attribution: the carrier keeps
+ * each leg separate and labels every frame, so nobody has to declare who is
+ * talking.
  */
 export default function PhoneCall({
   onTurn,
@@ -42,20 +43,15 @@ export default function PhoneCall({
   const [config, setConfig] = useState<TelephonyConfig | null>(null);
   const [active, setActive] = useState<ActiveCall[]>([]);
   const [attached, setAttached] = useState<string | null>(null);
-  const [from, setFrom] = useState<string>("");
+  const [from, setFrom] = useState("");
   const [status, setStatus] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
   const speech = useSpeech();
 
   useEffect(() => {
-    fetch("/api/telephony/config")
-      .then((r) => r.json())
-      .then(setConfig)
-      .catch(() => {});
+    fetch("/api/telephony/config").then((r) => r.json()).then(setConfig).catch(() => {});
   }, []);
 
-  // Poll for inbound calls. A real deployment would push this over a socket;
-  // for a single-operator console a 2s poll is honest and simpler.
   useEffect(() => {
     if (attached) return;
     const tick = () =>
@@ -68,6 +64,17 @@ export default function PhoneCall({
     return () => clearInterval(id);
   }, [attached]);
 
+  useEffect(
+    () => () => {
+      const ws = wsRef.current;
+      if (!ws) return;
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+      else if (ws.readyState === WebSocket.CONNECTING)
+        ws.addEventListener("open", () => ws.close());
+    },
+    [],
+  );
+
   function attach(callId: string) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws/observe/${callId}`);
@@ -76,155 +83,132 @@ export default function PhoneCall({
     onAttached(callId);
 
     ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      switch (msg.type) {
+      const m = JSON.parse(ev.data);
+      switch (m.type) {
         case "attached":
-          setFrom(msg.from || "");
-          setStatus(`attached · ${msg.backlog} turn(s) already handled`);
-          break;
         case "phone_connected":
-          setFrom(msg.from || "");
-          setStatus("caller connected");
+          setFrom(m.from || "");
+          setStatus(m.type === "attached" ? "on the call" : "caller connected");
           break;
         case "transcript":
           setStatus("");
-          onTurn(msg.turn);
+          onTurn(m.turn);
           break;
         case "thinking":
-          setStatus("analysing…");
+          setStatus("reading it…");
           break;
         case "assist":
           setStatus("");
-          onAssist(msg.assist);
-          if (msg.assist?.nba?.say && !msg.assist.blocked) {
-            speech.speak(msg.assist.nba.say);
-          }
+          onAssist(m.assist);
+          if (m.assist?.nba?.say && !m.assist.blocked) speech.speak(m.assist.nba.say);
           break;
         case "ledger":
-          onLedger(msg.ledger, msg.frontier_usd ?? 0);
+          onLedger(m.ledger, m.frontier_usd ?? 0);
           break;
         case "call_ended":
-          setStatus("caller hung up");
+          setStatus("they hung up");
           break;
       }
     };
-    ws.onclose = () => setStatus((s) => s || "disconnected");
   }
 
-  useEffect(
-    () => () => {
-      // Same StrictMode hazard as LiveVoice: closing a CONNECTING socket makes
-      // the browser fire an error event. Wait for the handshake first.
-      const ws = wsRef.current;
-      if (!ws) return;
-      if (ws.readyState === WebSocket.OPEN) ws.close();
-      else if (ws.readyState === WebSocket.CONNECTING) {
-        ws.addEventListener("open", () => ws.close());
-      }
-    },
-    [],
-  );
-
   return (
-    <div className="panel border-indigo-900/50">
-      <div className="panel-title flex items-center justify-between border-indigo-900/50">
-        <span className="text-indigo-400">Phone line</span>
+    <section className="card overflow-hidden">
+      <header
+        className="flex items-center justify-between border-b px-4 py-2.5"
+        style={{ borderColor: "var(--hairline)" }}
+      >
+        <span className="t-label">Phone line</span>
         <span
-          className={`chip ${
-            attached
-              ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30"
-              : config?.ready
-                ? "bg-indigo-500/10 text-indigo-300 ring-indigo-500/30"
-                : "bg-amber-500/10 text-amber-300 ring-amber-500/30"
+          className={`tag ${
+            attached ? "tag-verified" : config?.ready ? "" : "tag-yourcall"
           }`}
         >
-          {attached ? "on call" : config?.ready ? "listening" : "not configured"}
+          {attached ? "on a call" : config?.ready ? "waiting" : "not set up"}
         </span>
-      </div>
+      </header>
 
-      <div className="space-y-3 px-3 py-3">
+      <div className="space-y-3 p-4">
         {attached ? (
           <>
-            <div className="rounded border border-emerald-800/50 bg-emerald-950/20 px-2 py-2">
-              <div className="text-[11px] text-slate-400">Connected caller</div>
-              <div className="font-mono text-sm text-emerald-300">
-                {from || "unknown number"}
-              </div>
-              <div className="mt-0.5 font-mono text-[10px] text-slate-600">
-                {attached}
-              </div>
+            <div>
+              <span className="t-label">Caller</span>
+              <p className="t-data mt-1 text-[14px]">{from || "unknown number"}</p>
             </div>
             {status && (
-              <p className="text-[11px] text-indigo-400/80">{status}</p>
+              <p className="text-[12.5px]" style={{ color: "var(--graphite)" }}>
+                {status}
+              </p>
             )}
-            <p className="rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-[10px] leading-snug text-slate-500">
-              The carrier separates the two call legs, so the customer and the
-              agent arrive on different tracks. Speaker attribution here is
-              exact — no toggle, no guessing.
+            <p
+              className="rounded-md px-3 py-2 text-[11.5px] leading-relaxed"
+              style={{ background: "var(--verified-wash)", color: "var(--verified)" }}
+            >
+              The carrier sends each person on their own line, so I always know
+              who's speaking. Nothing to set.
             </p>
           </>
         ) : (
           <>
             {!config?.ready && (
-              <div className="rounded border border-amber-800/50 bg-amber-950/30 px-2 py-2">
-                <p className="text-[11px] leading-snug text-amber-200/90">
-                  No public URL configured, so a carrier cannot reach this
-                  server. Set <code className="font-mono">PUBLIC_BASE_URL</code>{" "}
-                  to an https tunnel and restart.
-                </p>
-              </div>
+              <p
+                className="rounded-md px-3 py-2 text-[12.5px] leading-relaxed"
+                style={{ background: "var(--yourcall-wash)", color: "var(--yourcall)" }}
+              >
+                No public address set, so a carrier can't reach this machine.
+                Set PUBLIC_BASE_URL to an https tunnel and restart.
+              </p>
             )}
 
             {config?.ready && (
-              <div className="space-y-1.5">
-                <div className="text-[11px] text-slate-400">
-                  Point your Twilio number's Voice webhook here
-                </div>
-                <code className="block break-all rounded border border-slate-800 bg-slate-950 px-2 py-1.5 font-mono text-[10px] text-slate-300">
+              <div>
+                <span className="t-label">Point your number here</span>
+                <p
+                  className="t-data mt-1 break-all rounded-md px-2.5 py-2"
+                  style={{ background: "var(--paper)" }}
+                >
                   {config.voice_webhook}
-                </code>
+                </p>
                 {!config.signature_verification && (
-                  <p className="text-[10px] leading-snug text-amber-500/80">
-                    Signature verification is off — set{" "}
-                    <code className="font-mono">TWILIO_AUTH_TOKEN</code> before
-                    exposing this publicly.
+                  <p className="mt-1.5 text-[11.5px]" style={{ color: "var(--yourcall)" }}>
+                    Signature checking is off — set TWILIO_AUTH_TOKEN before
+                    exposing this.
                   </p>
                 )}
               </div>
             )}
 
             <div>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">Inbound calls</span>
-                <span className="text-[10px] text-slate-600">polling…</span>
-              </div>
+              <span className="t-label">Incoming</span>
               {active.length === 0 ? (
-                <p className="rounded border border-slate-800 bg-slate-950/60 px-2 py-3 text-center text-[11px] text-slate-600">
-                  Waiting for a call.
-                  <span className="mt-1 block text-[10px]">
-                    No phone line? Run{" "}
-                    <code className="font-mono">python simulate_phone_call.py</code>
+                <p
+                  className="mt-2 rounded-md px-3 py-3 text-center text-[12.5px]"
+                  style={{ background: "var(--paper)", color: "var(--graphite)" }}
+                >
+                  Nobody on the line.
+                  <span className="mt-1 block text-[11.5px]">
+                    No phone? Run{" "}
+                    <span className="t-data">python simulate_phone_call.py</span>
                   </span>
                 </p>
               ) : (
-                <div className="space-y-1">
+                <div className="mt-2 space-y-2">
                   {active.map((c) => (
                     <button
                       key={c.call_id}
                       onClick={() => attach(c.call_id)}
-                      className="w-full rounded border border-emerald-800/60 bg-emerald-950/20 px-2 py-2 text-left transition hover:border-emerald-600"
+                      className="card block w-full px-3 py-2.5 text-left"
+                      style={{ borderColor: "var(--verified)" }}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs text-emerald-300">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="t-data text-[13px]">
                           {c.phone_number || "unknown"}
                         </span>
-                        <span className="chip bg-emerald-500/10 text-emerald-300 ring-emerald-500/30">
-                          answer
-                        </span>
+                        <span className="tag tag-verified">pick up</span>
                       </div>
-                      <div className="mt-0.5 font-mono text-[10px] text-slate-600">
-                        {c.call_id} · {c.turns} turn{c.turns === 1 ? "" : "s"}
-                      </div>
+                      <span className="t-data" style={{ color: "var(--graphite)" }}>
+                        {c.turns} turn{c.turns === 1 ? "" : "s"} so far
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -233,7 +217,8 @@ export default function PhoneCall({
           </>
         )}
 
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5">
+        <label className="flex cursor-pointer items-start gap-2.5 border-t pt-3"
+          style={{ borderColor: "var(--hairline)" }}>
           <input
             type="checkbox"
             checked={speech.enabled}
@@ -242,16 +227,16 @@ export default function PhoneCall({
               speech.setEnabled(e.target.checked);
               if (!e.target.checked) speech.cancel();
             }}
-            className="mt-0.5 accent-sky-500"
+            className="mt-0.5"
           />
-          <span className="text-[11px] leading-snug text-slate-400">
-            Read suggestions aloud
-            <span className="block text-[10px] text-slate-600">
-              Use an earpiece — the caller must not hear the co-pilot.
+          <span className="text-[12.5px] leading-snug">
+            Read lines to me
+            <span className="block text-[11.5px]" style={{ color: "var(--graphite)" }}>
+              Earpiece only — the caller must not hear it.
             </span>
           </span>
         </label>
       </div>
-    </div>
+    </section>
   );
 }
