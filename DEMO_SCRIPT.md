@@ -150,7 +150,38 @@ Type an agent ID → **Approve & apply**. Show the applied patch.
 
 ---
 
-## 7:00 — 8:00 · Architecture and close
+## 7:00 — 7:30 · Live voice (optional — only if the room is quiet)
+
+**Change call → Live voice → pick a customer → consent → Start listening.**
+
+Say into the mic, clearly:
+
+> *"My friend told me there's a one ninety nine processing fee that you don't
+> mention upfront. Is that true?"*
+
+Then stop talking. The level meter drops, the utterance closes on silence, and
+the transcript appears.
+
+> "Same pipeline. Whisper transcribed it, the co-pilot classified the intent,
+> and it caught the same stale-pricing case.
+>
+> One detail worth flagging: Whisper originally heard 'one ninety nine' as
+> **'$1.99'** — wrong currency, wrong magnitude. We fixed it with domain
+> priming, but the real protection is downstream: a mis-transcribed number
+> can't be quoted to a customer, because grounding won't match it."
+
+Tick **Read suggestions aloud** if you have an earpiece.
+
+> "And the speaker toggle — one microphone can't separate agent from customer,
+> and Whisper doesn't diarise. So we ask rather than guess. Guessing wrong would
+> quietly poison intent on every later turn."
+
+**If the room is loud, skip the mic and use the audio-upload box instead** —
+same pipeline, no acoustics risk.
+
+---
+
+## 7:30 — 8:00 · Architecture and close
 
 Switch to the second terminal:
 
@@ -185,6 +216,9 @@ While it scrolls:
 | A turn is slow (120B under load) | Talk over it — point at the tier path and note that turn escalated for a reason. |
 | WebSocket won't connect | Consent first. That's the gate working. |
 | Frontend blank | Check backend is on `:8000`; Vite proxies `/api` and `/ws` to it. |
+| Mic permission denied | Allow it via the browser address-bar icon, or fall back to the audio-upload box. |
+| Noisy room / mic picks up nothing | Use audio upload — identical pipeline, no acoustics risk. Prepare a clip beforehand. |
+| Utterance never closes | You didn't pause. It segments on ~900ms of silence; stop talking and wait a beat. |
 
 ## Questions you should expect
 

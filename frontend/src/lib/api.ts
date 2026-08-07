@@ -48,6 +48,30 @@ export const api = {
     fd.append("file", file);
     return fetch("/api/transcribe", { method: "POST", body: fd }).then(json<any>);
   },
+
+  /** Open a live microphone call. Consent is captured in the same request. */
+  liveStart: (customerId: string, agentName: string) =>
+    fetch("/api/live/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer_id: customerId,
+        agent_name: agentName,
+        consent_ack: true,
+      }),
+    }).then(json<{ call_id: string; customer_id: string; stt_model: string }>),
+
+  /** Upload one clip and run it through the full pipeline. */
+  audioTurn: (callId: string, file: File, speaker: "customer" | "agent") => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(
+      `/api/live/${callId}/audio-turn?speaker=${speaker}`,
+      { method: "POST", body: fd },
+    ).then(json<any>);
+  },
+
+  customers: () => fetch("/api/customers").then(json<any[]>),
 };
 
 export function openCallSocket(callId: string): WebSocket {

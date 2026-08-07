@@ -14,6 +14,7 @@ import pytest
 from app.agents.crm import _coerce_patch_value, _DROP, detect_opt_out
 from app.guardrails import rules
 from app.guardrails.pii import redact, scan
+from app.llm.client import normalise_currency
 from app.llm.router import RouteContext, route_nba, mentions_credit_terms
 from app.schemas import ActionType, Citation, Intent, ModelTier, Severity
 
@@ -266,6 +267,44 @@ class TestRouting:
 # ---------------------------------------------------------------------------
 # CRM patch coercion
 # ---------------------------------------------------------------------------
+
+
+class TestSpeechNormalisation:
+    """Whisper mangles spoken Indian rupee amounts in two specific ways.
+
+    Both matter because the grounding guardrail matches figures against
+    retrieved chunk text — a mis-transcribed amount either matches nothing (a
+    wasted turn) or, worse, matches the wrong thing.
+    """
+
+    def test_dollar_decimal_becomes_rupee_hundreds(self):
+        """The measured failure: 'one ninety nine' transcribed as '$1.99'."""
+        assert normalise_currency("a $1.99 processing fee") == "a ₹199 processing fee"
+
+    def test_plain_dollar_amount_becomes_rupees(self):
+        assert normalise_currency("$250 late fee") == "₹250 late fee"
+
+    def test_genuine_decimal_is_preserved(self):
+        """Two-digit integer part reads as a real amount, not a misheard one."""
+        assert normalise_currency("$12.50 charge") == "₹12.50 charge"
+
+    def test_hyphenated_spoken_number_is_joined(self):
+        """The other measured failure: 'one ninety nine' as '1-99'."""
+        assert normalise_currency("a 1-99 processing fee") == "a 199 processing fee"
+        assert normalise_currency("2-50 late fee") == "250 late fee"
+
+    def test_indian_digit_grouping_survives(self):
+        assert normalise_currency("$1,50,000 limit") == "₹1,50,000 limit"
+
+    def test_text_without_currency_is_untouched(self):
+        text = "I don't want another credit product on my name."
+        assert normalise_currency(text) == text
+
+    def test_dates_and_versions_are_not_mangled(self):
+        """The hyphen rule is scoped to 1-2 digits + exactly 2, so real ranges
+        and version strings must pass through."""
+        assert normalise_currency("v1-234 build") == "v1-234 build"
+        assert normalise_currency("2024-2026 period") == "2024-2026 period"
 
 
 class TestPatchCoercion:

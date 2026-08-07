@@ -11,16 +11,39 @@ import type {
 import AssistPanel from "./components/AssistPanel";
 import CostMeter from "./components/CostMeter";
 import PostCallReview from "./components/PostCallReview";
+import LiveVoice from "./components/LiveVoice";
+import AudioUpload from "./components/AudioUpload";
 import { Empty, Spinner } from "./components/Bits";
 
-type Phase = "select" | "consent" | "live" | "ended" | "review";
+type Phase =
+  | "mode"
+  | "select"
+  | "consent"
+  | "live"
+  | "ended"
+  | "review"
+  | "voice_setup"
+  | "voice_live";
+
+interface CustomerRow {
+  customer_id: string;
+  name: string;
+  city: string;
+  kyc_status: string;
+  do_not_call: boolean;
+}
 
 export default function App() {
   const [calls, setCalls] = useState<CallSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<CallDetail | null>(null);
-  const [phase, setPhase] = useState<Phase>("select");
+  const [phase, setPhase] = useState<Phase>("mode");
   const [agentName, setAgentName] = useState("Priya");
+
+  // voice mode
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [voiceCustomer, setVoiceCustomer] = useState<string>("");
+  const [liveCallId, setLiveCallId] = useState<string | null>(null);
 
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [assists, setAssists] = useState<TurnAssist[]>([]);
@@ -113,6 +136,29 @@ export default function App() {
     ws.onerror = () => setError("WebSocket error — is the backend running?");
   }
 
+  async function startVoiceCall() {
+    if (!voiceCustomer) {
+      setError("Pick a customer first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setTurns([]);
+    setAssists([]);
+    setLedger(null);
+    setPost(null);
+    try {
+      const r = await api.liveStart(voiceCustomer, agentName);
+      setLiveCallId(r.call_id);
+      setSelected(r.call_id);
+      setPhase("voice_live");
+    } catch (e: any) {
+      setError(String(e.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function finalise() {
     if (!selected) return;
     setBusy(true);
@@ -155,12 +201,18 @@ export default function App() {
               {mode === "live" ? "live · groq" : "mock"}
             </span>
           )}
-          {selected && (
+          {phase !== "mode" && (
             <button
               onClick={() => {
                 wsRef.current?.close();
-                setPhase("select");
+                setPhase("mode");
                 setSelected(null);
+                setLiveCallId(null);
+                setTurns([]);
+                setAssists([]);
+                setLedger(null);
+                setPost(null);
+                setError(null);
               }}
               className="text-[11px] text-slate-500 hover:text-slate-300"
             >
@@ -173,6 +225,124 @@ export default function App() {
       {error && (
         <div className="shrink-0 border-b border-rose-900/50 bg-rose-950/40 px-4 py-1.5 text-[11px] text-rose-300">
           {error}
+        </div>
+      )}
+
+      {/* ---------- mode picker ---------- */}
+      {phase === "mode" && (
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="w-full max-w-2xl">
+            <h2 className="mb-1 text-base font-semibold text-slate-200">
+              How do you want to run the co-pilot?
+            </h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Both paths run the identical pipeline — same agents, same
+              guardrails, same consent gate.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setPhase("select")}
+                className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-sky-800 hover:bg-slate-900"
+              >
+                <div className="mb-1 text-sm font-semibold text-slate-100">
+                  Scripted call
+                </div>
+                <p className="text-[11px] leading-snug text-slate-500">
+                  Replay one of four seeded transcripts turn by turn. Deterministic
+                  — the reliable demo path.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setPhase("voice_setup");
+                  api
+                    .customers()
+                    .then((c) => {
+                      setCustomers(c);
+                      if (c.length) setVoiceCustomer(c[0].customer_id);
+                    })
+                    .catch((e) => setError(String(e.message)));
+                }}
+                className="rounded-lg border border-emerald-900/60 bg-slate-900/60 p-4 text-left transition hover:border-emerald-700 hover:bg-slate-900"
+              >
+                <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-100">
+                  Live voice
+                  <span className="chip bg-emerald-500/10 text-emerald-300 ring-emerald-500/30">
+                    mic
+                  </span>
+                </div>
+                <p className="text-[11px] leading-snug text-slate-500">
+                  Speak into the microphone. Whisper transcribes each utterance
+                  and the co-pilot assists in real time. Audio upload too.
+                </p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- voice setup ---------- */}
+      {phase === "voice_setup" && (
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="w-full max-w-lg rounded-lg border border-amber-900/50 bg-slate-900/60 p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-amber-400">⚑</span>
+              <h2 className="text-sm font-semibold text-slate-100">
+                Mandatory consent disclosure
+              </h2>
+            </div>
+            <blockquote className="mb-4 rounded border-l-2 border-amber-600 bg-slate-950 px-3 py-2.5 text-xs italic leading-relaxed text-slate-300">
+              “Hi, this is {agentName} calling from PayFlex. Before we start — this
+              call may be recorded and I'm using an AI assistant to help me pull up
+              accurate information while we talk. Is that alright with you?”
+            </blockquote>
+            <div className="mb-4 rounded border border-slate-800 bg-slate-950/60 px-3 py-2">
+              <p className="text-[11px] leading-snug text-slate-500">
+                The live-audio socket refuses to accept a single byte of
+                microphone data until consent is on record — the same code gate
+                as the scripted path, not a second one.
+              </p>
+            </div>
+
+            <label className="mb-1 block text-[11px] text-slate-400">
+              Customer
+            </label>
+            <select
+              value={voiceCustomer}
+              onChange={(e) => setVoiceCustomer(e.target.value)}
+              className="mb-3 w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-sky-700 focus:outline-none"
+            >
+              {customers.map((c) => (
+                <option key={c.customer_id} value={c.customer_id}>
+                  {c.name} — {c.city} · kyc {c.kyc_status}
+                  {c.do_not_call ? " · DO NOT CALL" : ""}
+                </option>
+              ))}
+            </select>
+
+            <label className="mb-1 block text-[11px] text-slate-400">
+              Your name
+            </label>
+            <input
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+              className="mb-3 w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-sky-700 focus:outline-none"
+            />
+
+            <button
+              onClick={startVoiceCall}
+              disabled={busy || !voiceCustomer}
+              className="w-full rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
+            >
+              {busy ? "Opening session…" : "Customer consented — start voice call"}
+            </button>
+            <button
+              onClick={() => setPhase("mode")}
+              className="mt-2 w-full text-[11px] text-slate-500 hover:text-slate-300"
+            >
+              back
+            </button>
+          </div>
         </div>
       )}
 
@@ -264,7 +434,10 @@ export default function App() {
       )}
 
       {/* ---------- live workspace ---------- */}
-      {(phase === "live" || phase === "ended" || phase === "review") && (
+      {(phase === "live" ||
+        phase === "ended" ||
+        phase === "review" ||
+        phase === "voice_live") && (
         <div className="grid flex-1 grid-cols-12 gap-3 overflow-hidden p-3">
           {/* transcript */}
           <div className="col-span-4 flex flex-col overflow-hidden">
@@ -312,14 +485,18 @@ export default function App() {
                 {!turns.length && <Empty>Waiting for the first turn…</Empty>}
               </div>
 
-              {phase === "ended" && !post && (
+              {(phase === "ended" || phase === "voice_live") && !post && (
                 <div className="border-t border-slate-800 p-3">
                   <button
                     onClick={finalise}
-                    disabled={busy}
+                    disabled={busy || (phase === "voice_live" && !turns.length)}
                     className="w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-40"
                   >
-                    {busy ? "Summarising…" : "Call ended — generate CRM update"}
+                    {busy
+                      ? "Summarising…"
+                      : phase === "voice_live"
+                        ? "End call — generate CRM update"
+                        : "Call ended — generate CRM update"}
                   </button>
                 </div>
               )}
@@ -342,8 +519,34 @@ export default function App() {
             )}
           </div>
 
-          {/* cost */}
-          <div className="col-span-3 overflow-y-auto pr-1">
+          {/* voice controls + cost */}
+          <div className="col-span-3 space-y-3 overflow-y-auto pr-1">
+            {phase === "voice_live" && liveCallId && (
+              <>
+                <LiveVoice
+                  callId={liveCallId}
+                  onTurn={(t) => setTurns((prev) => [...prev, t])}
+                  onAssist={(a) => {
+                    setThinking(null);
+                    setAssists((prev) => [...prev, a]);
+                  }}
+                  onLedger={(l, f) => {
+                    setLedger(l);
+                    setFrontierUsd(f);
+                  }}
+                  onEnd={() => finalise()}
+                />
+                <AudioUpload
+                  callId={liveCallId}
+                  onTurn={(t) => setTurns((prev) => [...prev, t])}
+                  onAssist={(a) => setAssists((prev) => [...prev, a])}
+                  onLedger={(l, f) => {
+                    setLedger(l);
+                    setFrontierUsd(f);
+                  }}
+                />
+              </>
+            )}
             <CostMeter ledger={ledger} frontierUsd={frontierUsd} />
           </div>
         </div>

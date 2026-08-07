@@ -246,15 +246,71 @@ retrieval time, not answer time.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Audio | Scripted transcript playback **+** a real Whisper upload endpoint | Playback is deterministic and has no live-demo failure mode. Whisper is real, on the same key, and costs ~$0.003/call. |
-| Live mic streaming | **Not built** | Biggest time sink, most fragile thing to run on stage. |
+| Audio | **Three paths**: live mic, audio upload, scripted playback | All run the identical pipeline and consent gate. Playback stays the safe demo route; the voice paths are real. See §10. |
+| Speaker diarisation | **Not attempted** — the UI asks | One mic can't separate voices and Whisper doesn't diarise. A wrong guess silently poisons intent on every later turn; an explicit toggle is honest and correct. |
+| TTS provider | Browser speech synthesis | Free, offline, zero added latency. A co-pilot in an earpiece doesn't need a studio voice. |
 | Live-call state | In-process dict | One process for a hackathon. Production needs Redis so any worker can serve the socket. Called out, not hidden. |
 | Deploy | Local only | Per brief. |
 | Local kNN intent classifier | **Not built** | With the whole stack already on open-weights models, the "smaller model replaces an expensive LLM" principle is satisfied architecturally. It would have been a demo, not a design. |
 
 ---
 
-## 9. Repository map
+## 9. Voice
+
+```
+mic ──► Web Audio RMS ──► VAD: silence > 900ms ──► stop recorder
+                                                        │
+                                            complete .webm utterance
+                                                        │
+                                          WS /ws/live/{id} (binary frame)
+                                                        │
+                                        whisper-large-v3-turbo ($0.04/hr)
+                                                        │
+                                         currency normalisation + PII redact
+                                                        │
+                                        ── the same orchestrator as scripted ──
+                                                        │
+                              assist ──► dashboard  +  optional speech synthesis
+```
+
+**Segmentation, not chunking.** Only the *first* chunk of a MediaRecorder
+stream carries the webm header; later chunks are not independently decodable and
+Whisper rejects them. The recorder is therefore stopped and restarted at each
+silence boundary, yielding complete self-contained files. Segmenting on silence
+rather than a timer also makes each utterance map 1:1 onto a pipeline turn —
+identical in shape to the scripted path, so nothing downstream changes.
+
+Guards on the boundary detector: utterances under 400ms are dropped (coughs,
+clicks), a monologue is force-cut at 20s so the agent still gets help mid-flow,
+and transcripts under 3 characters are discarded because Whisper hallucinates
+filler ("Thank you.", "Bye.") on near-silent clips — which would otherwise enter
+conversation history and skew intent on every later turn.
+
+### The STT failure that mattered
+
+Whisper rendered *"a one ninety nine processing fee"* as **"a $1.99 processing
+fee"** — wrong currency and wrong magnitude. Grounding matches figures against
+retrieved chunk text, so a mis-transcribed amount matches nothing (a wasted
+turn) or the wrong thing (worse).
+
+Two mitigations, both cheap and both upstream of any reasoning model:
+
+1. **Domain priming.** A prompt naming rupees, Indian spoken-number forms, and
+   the product vocabulary. Measured on the same clip: `$1.99` → `199`.
+2. **Currency normalisation.** `$` amounts rewritten as rupees, hyphenated
+   spoken numbers joined (`1-99` → `199`). This product quotes no USD anywhere,
+   so a dollar sign in a transcript is always an artefact.
+
+Neither is a guarantee, and they are not presented as one — recognition on
+numbers is probabilistic and varies between runs on identical audio. **The
+safety property is downstream:** a figure that survives mis-transcription still
+cannot be quoted to a customer, because grounding won't match it. The
+normalisations reduce how often a good turn is wasted; grounding is what stops a
+bad one reaching a human.
+
+---
+
+## 10. Repository map
 
 ```
 backend/app/
@@ -263,7 +319,7 @@ backend/app/
 ├─ config.py         model tiers, pricing table, business goals
 ├─ main.py           FastAPI: REST + WS + Whisper + approval gate
 ├─ llm/
-│  ├─ client.py      Groq wrapper, usage capture, retry ladder
+│  ├─ client.py      Groq wrapper, usage capture, retry ladder, STT + priming
 │  └─ router.py      escalation rules (code, not prompt)
 ├─ rag/
 │  ├─ ingest.py      markdown → chunks → Chroma + BM25

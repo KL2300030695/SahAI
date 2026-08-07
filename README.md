@@ -123,13 +123,47 @@ cost claims are inspectable rather than asserted.
 
 ---
 
-## Audio
+## Voice
 
-Scripted transcript playback is the primary path — deterministic, and no
-live-demo failure mode. **Real audio also works**: `POST /api/transcribe` runs
-Whisper on the same Groq key at ~$0.003 for a five-minute call.
+Three input paths, all running the identical pipeline and the identical consent
+gate:
 
-Live mic streaming was deliberately not built; see `ARCHITECTURE.md` §8.
+| Path | How |
+|---|---|
+| **Live microphone** | Browser captures audio, segments it on ~900ms of silence, streams each complete utterance over `/ws/live/{id}`. Whisper transcribes; the co-pilot assists in real time. |
+| **Audio upload** | Drop a recorded clip into `POST /api/live/{id}/audio-turn` — transcribed and run through the full pipeline. Fallback when a mic isn't available. |
+| **Scripted playback** | Replays a seeded transcript. Deterministic, no dependencies — the safe demo path. |
+
+Suggestions can also be **read aloud** to the agent via browser speech
+synthesis (free, no added latency, no provider).
+
+### Two things worth knowing
+
+**Utterance segmentation, not fixed chunks.** Only the first chunk of a
+MediaRecorder stream carries the webm header — later chunks aren't
+independently decodable and Whisper rejects them. So the recorder is stopped and
+restarted at each silence boundary, producing complete files that map 1:1 onto
+pipeline turns.
+
+**Speaker attribution is stated, not guessed.** One microphone can't separate
+agent from customer, and Whisper doesn't diarise. The UI asks who is speaking
+rather than inventing an answer — getting it wrong would silently poison intent
+detection on every later turn.
+
+### The STT bug that mattered
+
+Whisper transcribed a customer saying *"a one ninety nine processing fee"* as
+**"a $1.99 processing fee"** — wrong currency *and* wrong magnitude. That breaks
+grounding, which matches figures against retrieved chunk text.
+
+Fixed with domain priming (measured: `$1.99` → `199`) plus a normalisation pass
+that rewrites `$` amounts as rupees and joins hyphenated spoken numbers
+(`1-99` → `199`). This product quotes no USD anywhere, so a dollar sign in a
+transcript is always an artefact.
+
+Neither is a guarantee — speech recognition on numbers is probabilistic. The
+actual safety property is downstream: **a mis-transcribed figure cannot be
+quoted back to the customer**, because grounding won't match it.
 
 ---
 
@@ -140,8 +174,12 @@ Live mic streaming was deliberately not built; see `ARCHITECTURE.md` §8.
 | `GET` | `/api/health` | Status and mode (live / mock) |
 | `GET` | `/api/policy` | Tiers, pricing, escalation rules, business goals |
 | `GET` | `/api/calls` | Available demo calls |
-| `POST` | `/api/calls/{id}/consent` | **Opens the session. Nothing works before this.** |
-| `WS` | `/ws/call/{id}` | Live agent-assist stream |
+| `GET` | `/api/customers` | Customers a live call can be opened against |
+| `POST` | `/api/calls/{id}/consent` | **Opens a scripted session. Nothing works before this.** |
+| `POST` | `/api/live/start` | **Opens a live voice session** (captures consent) |
+| `WS` | `/ws/call/{id}` | Scripted agent-assist stream |
+| `WS` | `/ws/live/{id}` | **Live microphone** — binary audio in, assist out |
+| `POST` | `/api/live/{id}/audio-turn` | Upload a clip → STT → full pipeline |
 | `POST` | `/api/calls/{id}/finalise` | Summary, CRM patch, follow-up draft |
 | `POST` | `/api/calls/{id}/approve` | **The human gate.** Requires `approver_id`. |
 | `GET` | `/api/calls/{id}/ledger` | Per-decision cost ledger |

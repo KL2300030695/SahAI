@@ -31,6 +31,71 @@ def _supports_reasoning_effort(model: str) -> bool:
     return "gpt-oss" in model
 
 
+# ---------------------------------------------------------------------------
+# Speech-to-text priming
+# ---------------------------------------------------------------------------
+
+# Whisper defaults to US conventions and mangles Indian fintech speech in ways
+# that matter downstream. Measured on the same clip of a customer saying
+# "a one ninety nine processing fee":
+#
+#   no prompt / generic prompt  ->  "a $1.99 processing fee"
+#   this prompt                 ->  "a 199 processing fee"
+#
+# That is not cosmetic. "$1.99" is the wrong currency AND the wrong magnitude,
+# and the grounding guardrail matches figures against retrieved chunk text --
+# so a mis-transcribed amount either fails to match anything or, worse, matches
+# the wrong thing. Priming the decoder is the cheapest fix available: it costs
+# nothing and happens before any reasoning model sees the turn.
+STT_PROMPT = (
+    "Indian fintech inside-sales call about PayFlex Pay-in-3, a zero-cost EMI "
+    "product. All money amounts are in Indian rupees and must be written with "
+    "the rupee symbol, never a dollar sign. Spoken numbers like 'one ninety "
+    "nine' mean 199 and 'two fifty' means 250. Domain terms: Aadhaar, PAN, KYC, "
+    "e-KYC, OTP, UPI AutoPay, e-NACH mandate, instalment, EMI, CIBIL, lakh."
+)
+
+# Belt and braces for the amounts the prompt does not catch. This product quotes
+# no USD amount anywhere -- every figure in the knowledge base is in rupees -- so
+# a dollar sign in a transcript is always a speech-recognition artefact, never a
+# real quantity. Rewriting it keeps the grounding check comparing like with like.
+_DOLLAR = re.compile(r"\$\s?(\d[\d,]*)(?:\.(\d{2}))?\b")
+
+# Whisper also renders "one ninety nine" as "1-99" and "two fifty" as "2-50" --
+# it hears the compound as two spoken groups and hyphenates them. Narrowly
+# scoped to 1-2 digits followed by exactly 2, which covers the spoken hundreds
+# forms this domain uses without touching a year range or a version number.
+_SPLIT_NUMBER = re.compile(r"(?<![\w.-])(\d{1,2})-(\d{2})(?![\w.-])")
+
+
+def normalise_currency(text: str) -> str:
+    """Repair the two ways Whisper mangles spoken Indian rupee amounts.
+
+    `$1.99` becomes `₹199`: Whisper writes the decimal form when it hears
+    "one ninety nine" as a price, so the digits are right and only the placement
+    is wrong. A genuine decimal (`$12.50` -> `₹12.50`) is preserved when the
+    integer part has more than one digit, since that reads as a real amount
+    rather than a misheard hundreds figure.
+
+    `1-99` becomes `199`, likewise.
+
+    Neither of these is a guarantee, and they are not meant to be. Speech
+    recognition on numbers is probabilistic and the output varies between runs
+    on identical audio. The actual safety property comes from the grounding
+    guardrail downstream: a figure that survives mis-transcription cannot be
+    quoted back to the customer, because it will not match any retrieved chunk.
+    These normalisations reduce how often a good turn is wasted; grounding is
+    what stops a bad one reaching a human.
+    """
+    def repl(m: re.Match[str]) -> str:
+        whole, cents = m.group(1), m.group(2)
+        if cents and len(whole.replace(",", "")) == 1:
+            return f"₹{whole}{cents}"  # $1.99 -> ₹199
+        return f"₹{whole}" + (f".{cents}" if cents else "")
+
+    return _SPLIT_NUMBER.sub(r"\1\2", _DOLLAR.sub(repl, text))
+
+
 @dataclass
 class LLMResponse:
     text: str
@@ -232,20 +297,36 @@ class LLMClient:
 
     # -- speech ----------------------------------------------------------
 
-    def transcribe(self, file_path: str) -> tuple[str, float]:
-        """Whisper on Groq. Returns (text, seconds_of_audio)."""
+    def transcribe_bytes(
+        self, audio: bytes, filename: str = "audio.webm", *, language: str = "en"
+    ) -> tuple[str, float]:
+        """Whisper on Groq. Returns (text, seconds_of_audio).
+
+        Takes bytes rather than a path so the live-mic WebSocket can transcribe
+        an utterance straight from the socket without a temp-file round trip.
+        Groq accepts flac/mp3/mp4/m4a/mpeg/mpga/ogg/wav/webm; the browser's
+        MediaRecorder produces `audio/webm;codecs=opus`, which is on that list.
+        """
         if self.mock:
             return ("[mock transcription]", 0.0)
         assert self._client is not None
-        with open(file_path, "rb") as fh:
-            result = self._client.audio.transcriptions.create(
-                file=(file_path, fh.read()),
-                model=self.settings.model_stt,
-                response_format="verbose_json",
-            )
+        result = self._client.audio.transcriptions.create(
+            file=(filename, audio),
+            model=self.settings.model_stt,
+            response_format="verbose_json",
+            language=language,
+            prompt=STT_PROMPT,
+        )
         text = getattr(result, "text", "") or ""
         duration = float(getattr(result, "duration", 0.0) or 0.0)
-        return text, duration
+        return normalise_currency(text.strip()), duration
+
+    def transcribe(self, file_path: str) -> tuple[str, float]:
+        """Path-based convenience wrapper over `transcribe_bytes`."""
+        if self.mock:
+            return ("[mock transcription]", 0.0)
+        with open(file_path, "rb") as fh:
+            return self.transcribe_bytes(fh.read(), filename=file_path)
 
 
 _client: Optional[LLMClient] = None

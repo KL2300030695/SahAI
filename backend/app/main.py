@@ -375,6 +375,245 @@ async def ws_call(ws: WebSocket, call_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Live voice call
+# ---------------------------------------------------------------------------
+
+
+class LiveStartBody(BaseModel):
+    customer_id: str
+    agent_name: str = "Agent"
+    consent_ack: bool = False
+
+
+@app.post("/api/live/start")
+def live_start(body: LiveStartBody, db: Session = Depends(get_session)) -> dict:
+    """Open a live microphone call session.
+
+    Consent is captured here, in the same call that creates the session, so the
+    same gate covers scripted and live calls alike — there is no second code
+    path where a live call could start unconsented.
+    """
+    if not body.consent_ack:
+        raise HTTPException(
+            400,
+            "Consent declined. Recording and AI assistance must stay disabled; "
+            "offer the customer a callback on a non-recorded line.",
+        )
+    customer = db.get(Customer, body.customer_id)
+    if not customer:
+        raise HTTPException(404, f"unknown customer {body.customer_id!r}")
+
+    call_id = f"live-{uuid.uuid4().hex[:8]}"
+    live = LiveCall(
+        call_id=call_id, customer_id=body.customer_id, agent_name=body.agent_name
+    )
+    live.consent_ack = True
+    live.consent_at = datetime.now(timezone.utc)
+    LIVE[call_id] = live
+
+    with session_scope() as s:
+        s.add(
+            Call(
+                call_id=call_id,
+                customer_id=body.customer_id,
+                agent_name=body.agent_name,
+                consent_ack=True,
+                consent_at=live.consent_at,
+            )
+        )
+
+    return {
+        "call_id": call_id,
+        "customer_id": body.customer_id,
+        "consent_ack": True,
+        "stt_model": settings.model_stt,
+    }
+
+
+@app.websocket("/ws/live/{call_id}")
+async def ws_live(ws: WebSocket, call_id: str) -> None:
+    """Live microphone co-pilot.
+
+    Protocol: the client sends one **complete** audio blob per utterance as a
+    binary frame, preceded by a small JSON frame naming the speaker. Each blob
+    is a self-contained webm file, because MediaRecorder chunks after the first
+    carry no header and are not independently decodable — so the browser stops
+    and restarts the recorder at each silence boundary rather than slicing a
+    continuous stream.
+
+    Segmenting on silence rather than on a fixed timer is what makes this map
+    cleanly onto the existing pipeline: one utterance in, one `TurnAssist` out,
+    identical to the scripted path.
+    """
+    await ws.accept()
+
+    live = LIVE.get(call_id)
+    if live is None or not live.consent_ack:
+        await ws.send_json(
+            {
+                "type": "blocked",
+                "reason": "consent_not_recorded",
+                "message": (
+                    "No consent on record for this call. The orchestrator will not "
+                    "process audio until consent is captured."
+                ),
+            }
+        )
+        await ws.close()
+        return
+
+    orch = get_orchestrator()
+    llm = get_llm()
+    with session_scope() as s:
+        crm = get_crm_snapshot(s, live.customer_id)
+
+    await ws.send_json(
+        {
+            "type": "ready",
+            "call_id": call_id,
+            "stt_model": settings.model_stt,
+            "mode": "mock" if settings.mock_mode else "live",
+        }
+    )
+
+    # The speaker of the *next* binary frame. A single microphone cannot
+    # separate the agent from the customer, and Whisper does not diarise, so the
+    # UI states who is talking rather than the system guessing. Called out
+    # plainly instead of pretending diarization is happening.
+    next_speaker = Speaker.CUSTOMER
+    turn_index = len(live.history)
+
+    try:
+        while True:
+            message = await ws.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            # --- control frame ---
+            if (text := message.get("text")) is not None:
+                try:
+                    ctrl = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+                if ctrl.get("action") == "speaker":
+                    next_speaker = (
+                        Speaker.AGENT
+                        if ctrl.get("speaker") == "agent"
+                        else Speaker.CUSTOMER
+                    )
+                elif ctrl.get("action") == "end":
+                    break
+                continue
+
+            # --- audio frame ---
+            audio = message.get("bytes")
+            if not audio:
+                continue
+
+            await ws.send_json({"type": "transcribing", "bytes": len(audio)})
+
+            try:
+                transcript, seconds = await asyncio.to_thread(
+                    llm.transcribe_bytes, audio, "utterance.webm"
+                )
+            except Exception as e:  # noqa: BLE001 — surface STT failures to the UI
+                await ws.send_json({"type": "stt_error", "message": str(e)[:300]})
+                continue
+
+            live.meter.record_stt(
+                "whisper",
+                settings.model_stt,
+                price_audio_seconds(settings.model_stt, seconds),
+                0.0,
+            )
+
+            # Whisper hallucinates filler on silence ("Thank you.", "Bye.") when
+            # handed a near-empty clip. Dropping very short transcripts keeps
+            # those out of the conversation history, where they would otherwise
+            # skew intent on every later turn.
+            if len(transcript) < 3:
+                await ws.send_json(
+                    {"type": "transcript_skipped", "text": transcript, "seconds": seconds}
+                )
+                continue
+
+            turn = TranscriptTurn(
+                index=turn_index,
+                speaker=next_speaker,
+                text=transcript,
+                ts=float(turn_index),
+            )
+            turn_index += 1
+
+            from app.guardrails.pii import redact
+
+            redacted = redact(transcript)
+            await ws.send_json(
+                {
+                    "type": "transcript",
+                    "turn": {
+                        "index": turn.index,
+                        "speaker": turn.speaker.value,
+                        "text": redacted.text,
+                        "ts": turn.ts,
+                    },
+                    "pii_redacted": redacted.found,
+                    "seconds": seconds,
+                }
+            )
+
+            if turn.speaker != Speaker.CUSTOMER:
+                live.history.append(turn)
+                continue
+
+            await ws.send_json({"type": "thinking", "turn_index": turn.index})
+
+            try:
+                assist = await asyncio.to_thread(
+                    orch.handle_turn,
+                    call_id=call_id,
+                    turn=turn,
+                    history=list(live.history),
+                    meter=live.meter,
+                    consent_ack=live.consent_ack,
+                    crm=crm,
+                )
+            except ConsentNotGiven as e:
+                await ws.send_json({"type": "blocked", "reason": str(e)})
+                break
+
+            live.history.append(turn)
+            if assist.intent:
+                live.intents_seen.append(assist.intent.intent)
+                live.max_dropoff_risk = max(
+                    live.max_dropoff_risk, assist.intent.dropoff_risk
+                )
+
+            payload = json.loads(assist.model_dump_json())
+            live.assists.append(payload)
+            await ws.send_json({"type": "assist", "assist": payload})
+            await ws.send_json(
+                {
+                    "type": "ledger",
+                    "ledger": json.loads(live.meter.ledger().model_dump_json()),
+                    "frontier_usd": live.meter.frontier_baseline_usd(),
+                }
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        with session_scope() as s:
+            for row in live.meter.rows:
+                record_cost(s, row)
+        try:
+            await ws.send_json({"type": "call_ended", "call_id": call_id})
+            await ws.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Post-call
 # ---------------------------------------------------------------------------
 
@@ -499,6 +738,22 @@ def ledger(call_id: str) -> dict:
     }
 
 
+@app.get("/api/customers")
+def list_customers(db: Session = Depends(get_session)) -> list[dict]:
+    """Customers a live call can be opened against."""
+    return [
+        {
+            "customer_id": c.customer_id,
+            "name": c.name,
+            "city": c.city,
+            "kyc_status": c.kyc_status,
+            "last_disposition": c.last_disposition,
+            "do_not_call": c.do_not_call,
+        }
+        for c in db.query(Customer).order_by(Customer.customer_id).all()
+    ]
+
+
 @app.get("/api/customers/{customer_id}")
 def get_customer(customer_id: str, db: Session = Depends(get_session)) -> dict:
     c = db.get(Customer, customer_id)
@@ -527,26 +782,22 @@ def get_customer(customer_id: str, db: Session = Depends(get_session)) -> dict:
 
 @app.post("/api/transcribe")
 async def transcribe(file: UploadFile = File(...)) -> dict:
-    """Transcribe real call audio with Whisper on Groq.
+    """Transcribe audio with Whisper on Groq. Pure STT, no pipeline.
 
-    Same key, same provider as the rest of the pipeline, billed per hour of
-    audio rather than per token ($0.04/hr on whisper-large-v3-turbo — about
-    $0.003 for a five-minute call). The scripted-playback path remains the
-    primary demo route; this exists so the voice story is real rather than
-    claimed.
+    Same key and provider as everything else, billed per hour of audio rather
+    than per token ($0.04/hr on whisper-large-v3-turbo — about $0.003 for a
+    five-minute call).
     """
-    ensure_runtime_dirs()
-    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
-    dest = UPLOADS / f"{uuid.uuid4().hex}{suffix}"
-    with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(400, "empty upload")
 
     try:
-        text, duration = await asyncio.to_thread(get_llm().transcribe, str(dest))
+        text, duration = await asyncio.to_thread(
+            get_llm().transcribe_bytes, audio, file.filename or "audio.wav"
+        )
     except Exception as e:  # noqa: BLE001 - surface provider errors to the UI
         raise HTTPException(502, f"transcription failed: {e}") from e
-    finally:
-        dest.unlink(missing_ok=True)
 
     from app.guardrails.pii import redact
 
@@ -557,4 +808,76 @@ async def transcribe(file: UploadFile = File(...)) -> dict:
         "audio_seconds": duration,
         "model": settings.model_stt,
         "usd": round(price_audio_seconds(settings.model_stt, duration), 8),
+    }
+
+
+@app.post("/api/live/{call_id}/audio-turn")
+async def audio_turn(
+    call_id: str,
+    file: UploadFile = File(...),
+    speaker: str = "customer",
+) -> dict:
+    """Transcribe an uploaded clip and run it through the full pipeline.
+
+    The REST counterpart of the live-mic socket, for analysing a recorded call
+    or for demoing the voice path without a working microphone. Same consent
+    gate, same orchestrator, same guardrails.
+    """
+    live = LIVE.get(call_id)
+    if live is None or not live.consent_ack:
+        raise HTTPException(400, "call not started, or no consent on record")
+
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(400, "empty upload")
+
+    llm = get_llm()
+    try:
+        text, duration = await asyncio.to_thread(
+            llm.transcribe_bytes, audio, file.filename or "audio.wav"
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"transcription failed: {e}") from e
+
+    live.meter.record_stt(
+        "whisper",
+        settings.model_stt,
+        price_audio_seconds(settings.model_stt, duration),
+        0.0,
+    )
+
+    if len(text) < 3:
+        raise HTTPException(422, f"nothing usable transcribed (got {text!r})")
+
+    turn = TranscriptTurn(
+        index=len(live.history),
+        speaker=Speaker.AGENT if speaker == "agent" else Speaker.CUSTOMER,
+        text=text,
+        ts=float(len(live.history)),
+    )
+
+    with session_scope() as s:
+        crm = get_crm_snapshot(s, live.customer_id)
+
+    assist = await asyncio.to_thread(
+        get_orchestrator().handle_turn,
+        call_id=call_id,
+        turn=turn,
+        history=list(live.history),
+        meter=live.meter,
+        consent_ack=live.consent_ack,
+        crm=crm,
+    )
+    live.history.append(turn)
+    if assist.intent:
+        live.intents_seen.append(assist.intent.intent)
+        live.max_dropoff_risk = max(live.max_dropoff_risk, assist.intent.dropoff_risk)
+
+    payload = json.loads(assist.model_dump_json())
+    live.assists.append(payload)
+    return {
+        "assist": payload,
+        "audio_seconds": duration,
+        "ledger": json.loads(live.meter.ledger().model_dump_json()),
+        "frontier_usd": live.meter.frontier_baseline_usd(),
     }
