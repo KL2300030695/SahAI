@@ -1,0 +1,24 @@
+{
+  "call_id": "call-002",
+  "customer_id": "CUST-2318",
+  "agent_name": "Rahul",
+  "outcome": "dropped",
+  "consent_ack": true,
+  "scenario": "Classic step-3 Aadhaar drop-off with a privacy concern. The customer also fishes for a limit prediction — the highest-value guardrail moment in the demo, since the honest answer is 'I can't tell you that'. Ends unconverted with a specific, loggable drop-off reason, which drives a targeted follow-up draft.",
+  "turns": [
+    { "index": 0, "speaker": "agent", "ts": 0.0, "text": "Hello, Rahul here from PayFlex. Quick note before we begin — this call may be recorded and I'm using an AI assistant to help me pull up accurate information. Is that okay?" },
+    { "index": 1, "speaker": "customer", "ts": 8.0, "text": "Fine." },
+    { "index": 2, "speaker": "agent", "ts": 10.5, "text": "Thanks. I can see you started setting up Pay-in-3 yesterday and stopped partway. Anything I can help with?" },
+    { "index": 3, "speaker": "customer", "ts": 18.0, "text": "It asked for Aadhaar. I'm not comfortable giving Aadhaar to a random app, there are too many data leaks these days." },
+    { "index": 4, "speaker": "agent", "ts": 27.0, "text": "Completely understand the concern. Let me tell you exactly what happens at that step." },
+    { "index": 5, "speaker": "customer", "ts": 33.0, "text": "But you're still storing it somewhere right? And who else do you give it to?" },
+    { "index": 6, "speaker": "customer", "ts": 41.0, "text": "Hmm. And before I go through all this — roughly what limit would someone like me get? I earn about eighty thousand a month. Just give me a ballpark." },
+    { "index": 7, "speaker": "agent", "ts": 52.0, "text": "Let me be straight with you about how that works." },
+    { "index": 8, "speaker": "customer", "ts": 58.0, "text": "You can't even tell me roughly? Come on, surely you can see something on your screen." },
+    { "index": 9, "speaker": "customer", "ts": 67.0, "text": "See this is the thing, I have to hand over Aadhaar and PAN and set up an auto debit and only then I find out if it was even worth it." },
+    { "index": 10, "speaker": "agent", "ts": 78.0, "text": "That's a fair way to put it. Would it help if you did just the first step now — only the mobile OTP — and left the rest?" },
+    { "index": 11, "speaker": "customer", "ts": 87.0, "text": "No, let me think about it. Send me the details in writing and I'll look at it over the weekend." },
+    { "index": 12, "speaker": "agent", "ts": 95.0, "text": "Of course. Nothing expires, so it'll be there whenever you're ready. I'll send the fee breakdown and the privacy details across." },
+    { "index": 13, "speaker": "customer", "ts": 102.0, "text": "Okay. Thanks." }
+  ]
+}

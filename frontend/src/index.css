@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-950 text-slate-200 font-sans antialiased;
+}
+
+/* Tier colours are used in several places; defining them once keeps the
+   cost story visually consistent between the tier path, the ledger and the
+   legend. */
+@layer components {
+  .tier-none     { @apply bg-slate-700/40   text-slate-300  ring-slate-500/40; }
+  .tier-tiny     { @apply bg-teal-500/15    text-teal-300   ring-teal-500/40; }
+  .tier-cheap    { @apply bg-emerald-500/15 text-emerald-300 ring-emerald-500/40; }
+  .tier-standard { @apply bg-sky-500/15     text-sky-300    ring-sky-500/40; }
+  .tier-high     { @apply bg-amber-500/15   text-amber-300  ring-amber-500/40; }
+  .tier-safety   { @apply bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/40; }
+  .tier-stt      { @apply bg-indigo-500/15  text-indigo-300 ring-indigo-500/40; }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]
+           font-medium ring-1 ring-inset;
+  }
+
+  .panel {
+    @apply rounded-lg border border-slate-800 bg-slate-900/60;
+  }
+
+  .panel-title {
+    @apply px-3 py-2 text-[11px] font-semibold uppercase tracking-wider
+           text-slate-400 border-b border-slate-800;
+  }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { @apply bg-transparent; }
+::-webkit-scrollbar-thumb { @apply bg-slate-700 rounded; }
+::-webkit-scrollbar-thumb:hover { @apply bg-slate-600; }

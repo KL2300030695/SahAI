@@ -1,0 +1,41 @@
+# --- secrets: never commit ---
+.env
+.env.local
+*.key
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- generated data stores ---
+backend/app/rag/store/
+backend/data/
+*.sqlite
+*.sqlite3
+*.db
+
+# --- runtime artefacts ---
+backend/logs/
+uploads/
+*.wav
+*.mp3
+
+# --- node / vite ---
+node_modules/
+dist/
+.vite/
+*.local
+
+# --- editors / os ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# typescript build cache
+*.tsbuildinfo

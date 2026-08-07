@@ -1,0 +1,25 @@
+{
+  "call_id": "call-003",
+  "customer_id": "CUST-3771",
+  "agent_name": "Anjali",
+  "outcome": "converted",
+  "consent_ack": true,
+  "scenario": "Credit-score objection from a customer with an existing home loan. Exercises the two-sided honest answer (helps if paid on time, hurts at 30 days past due) and the soft-vs-hard-enquiry distinction. Also asks a merchant-coverage question that must not be answered from memory.",
+  "turns": [
+    { "index": 0, "speaker": "agent", "ts": 0.0, "text": "Good afternoon, this is Anjali from PayFlex. Before we go ahead — this call may be recorded and I'm using an AI assistant to help me quote accurate details. Is that alright?" },
+    { "index": 1, "speaker": "customer", "ts": 9.0, "text": "Yes that's fine." },
+    { "index": 2, "speaker": "agent", "ts": 11.5, "text": "Thank you. You'd enquired about splitting a purchase into three payments. What can I help with?" },
+    { "index": 3, "speaker": "customer", "ts": 18.0, "text": "My main worry is my credit score. I've got a home loan application going in next month and I don't want anything messing with my CIBIL right now." },
+    { "index": 4, "speaker": "agent", "ts": 28.0, "text": "That's a very sensible thing to check before you commit. Let me give you the accurate picture." },
+    { "index": 5, "speaker": "customer", "ts": 35.0, "text": "So does just checking my eligibility put an enquiry on my report? Because I've heard too many enquiries look bad." },
+    { "index": 6, "speaker": "customer", "ts": 45.0, "text": "Okay, and if I take it and pay everything on time, does that actually help or does it just sit there neutral?" },
+    { "index": 7, "speaker": "agent", "ts": 55.0, "text": "It does get reported — let me give you both sides of that so there's no surprise later." },
+    { "index": 8, "speaker": "customer", "ts": 62.0, "text": "Alright, that's fair enough. You're not overselling it, I appreciate that." },
+    { "index": 9, "speaker": "customer", "ts": 70.0, "text": "One more thing — can I use this at Croma? That's where I'm buying the washing machine." },
+    { "index": 10, "speaker": "agent", "ts": 78.0, "text": "Let me check the current partner list rather than guess at it." },
+    { "index": 11, "speaker": "customer", "ts": 84.0, "text": "Okay good. And the total is definitely just the price of the machine, nothing added?" },
+    { "index": 12, "speaker": "agent", "ts": 92.0, "text": "Correct — let me confirm the exact split for your cart value." },
+    { "index": 13, "speaker": "customer", "ts": 98.0, "text": "Right, let's set it up then. I'll do the KYC now." },
+    { "index": 14, "speaker": "customer", "ts": 106.0, "text": "Okay, mandate is done and it's showing the three dates. All good, thank you." }
+  ]
+}

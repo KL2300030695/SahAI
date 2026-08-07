@@ -1,0 +1,25 @@
+{
+  "call_id": "call-001",
+  "customer_id": "CUST-1042",
+  "agent_name": "Priya",
+  "outcome": "converted",
+  "consent_ack": true,
+  "scenario": "Sceptical about hidden charges. Quotes an outdated ₹199 processing fee a friend told them about — exercises the stale-terms guardrail, because the superseded 2024 pricing doc is in the KB and must not be quoted back. Also contains a spoken phone number to exercise PII redaction.",
+  "turns": [
+    { "index": 0, "speaker": "agent", "ts": 0.0, "text": "Hi, this is Priya calling from PayFlex. Before we start — this call may be recorded and I'm using an AI assistant to help me pull up accurate information while we talk. Is that alright with you?" },
+    { "index": 1, "speaker": "customer", "ts": 7.2, "text": "Yeah that's fine, go ahead." },
+    { "index": 2, "speaker": "agent", "ts": 10.0, "text": "Thank you. So you'd looked at the Pay-in-3 option on your laptop purchase last week but didn't complete it. I wanted to see if there was anything I could clear up." },
+    { "index": 3, "speaker": "customer", "ts": 17.5, "text": "Honestly I just don't believe the zero cost thing. Nothing is free. What's the catch, where are you actually making money?" },
+    { "index": 4, "speaker": "agent", "ts": 26.0, "text": "That's a fair question, let me answer it properly." },
+    { "index": 5, "speaker": "customer", "ts": 31.0, "text": "Also my friend told me there's a one ninety nine processing fee that you people don't mention upfront. Is that true or not?" },
+    { "index": 6, "speaker": "agent", "ts": 39.5, "text": "Let me check the current schedule on that." },
+    { "index": 7, "speaker": "customer", "ts": 44.0, "text": "Okay. And what happens if I miss a payment, does the interest start piling up then?" },
+    { "index": 8, "speaker": "customer", "ts": 52.0, "text": "Right. Okay, that's actually clearer than I expected. What do I need to sign up, salary slips and all that?" },
+    { "index": 9, "speaker": "agent", "ts": 60.0, "text": "Much less than you'd think — let me pull up the exact list." },
+    { "index": 10, "speaker": "customer", "ts": 66.0, "text": "That's it? Okay. My number is 98450 33127, is that the one you have on file for the OTP?" },
+    { "index": 11, "speaker": "agent", "ts": 74.0, "text": "Let me confirm that against your record." },
+    { "index": 12, "speaker": "customer", "ts": 79.0, "text": "Great. Alright, let's do it, I'll start it now while you're on the line." },
+    { "index": 13, "speaker": "agent", "ts": 85.0, "text": "Perfect, I'll stay on. There's a second OTP at the Aadhaar step which is where people usually pause — I'll walk you through it." },
+    { "index": 14, "speaker": "customer", "ts": 93.0, "text": "Done, it's showing my limit now. Thanks, that was easier than I thought." }
+  ]
+}

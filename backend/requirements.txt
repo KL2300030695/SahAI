@@ -1,0 +1,27 @@
+# --- web ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+websockets==14.1
+
+# --- config / validation ---
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
+
+# --- llm provider ---
+groq==0.15.0
+
+# --- rag ---
+# chromadb ships an ONNX all-MiniLM-L6-v2 embedder (~80MB) via onnxruntime,
+# so we get local embeddings WITHOUT pulling in torch (~2GB). Deliberate.
+chromadb==0.5.23
+rank-bm25==0.2.2
+
+# --- persistence ---
+SQLAlchemy==2.0.36
+
+# --- test ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

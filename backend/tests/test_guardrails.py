@@ -1,0 +1,288 @@
+"""
+Tests for the deterministic guardrails.
+
+These are the checks the pitch claims cannot be prompt-injected away, so they
+are the ones worth proving. Every test here runs without a network call.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from app.agents.crm import _coerce_patch_value, _DROP, detect_opt_out
+from app.guardrails import rules
+from app.guardrails.pii import redact, scan
+from app.llm.router import RouteContext, route_nba, mentions_credit_terms
+from app.schemas import ActionType, Citation, Intent, ModelTier, Severity
+
+
+def cite(chunk_id: str, text: str, effective_to: str | None = None) -> Citation:
+    return Citation(
+        doc_id=chunk_id.split("#")[0],
+        title="t",
+        chunk_id=chunk_id,
+        text=text,
+        score=1.0,
+        effective_to=effective_to,
+    )
+
+
+# ---------------------------------------------------------------------------
+# grounding
+# ---------------------------------------------------------------------------
+
+
+class TestGrounding:
+    def test_figure_present_in_cited_chunk_passes(self):
+        c = [cite("pricing#0", "The late payment fee is ₹250 flat per instalment.")]
+        r = rules.check_grounding("There's a ₹250 late fee if you miss one.", ["pricing#0"], c)
+        assert r.passed
+        assert r.enforced_by == "code"
+
+    def test_invented_figure_is_blocked(self):
+        c = [cite("pricing#0", "The late payment fee is ₹250 flat.")]
+        r = rules.check_grounding("The late fee is ₹499.", ["pricing#0"], c)
+        assert not r.passed
+        assert r.severity == Severity.BLOCK
+        assert "499" in r.detail
+
+    def test_figure_with_no_citation_at_all_is_blocked(self):
+        r = rules.check_grounding("KYC takes about 5 minutes.", [], [])
+        assert not r.passed
+        assert "cites no knowledge-base chunk" in r.detail
+
+    def test_no_figures_means_nothing_to_ground(self):
+        r = rules.check_grounding("Let me check that for you.", [], [])
+        assert r.passed
+
+    def test_the_real_regression_kyc_duration(self):
+        """The live run produced 'about 5 minutes' when the KB says 'under 4'.
+        This is that exact case."""
+        c = [cite("kyc#0", "Typical completion time: under 4 minutes end to end.")]
+        r = rules.check_grounding("It's all done in about 5 minutes.", ["kyc#0"], c)
+        assert not r.passed
+
+    def test_hallucinated_chunk_id_cannot_satisfy_the_check(self):
+        """Citing an id that was never retrieved must not launder a claim."""
+        c = [cite("pricing#0", "Late fee is ₹250.")]
+        r = rules.check_grounding("The fee is ₹999.", ["made-up#7"], c)
+        assert not r.passed
+
+
+# ---------------------------------------------------------------------------
+# staleness
+# ---------------------------------------------------------------------------
+
+
+class TestStaleTerms:
+    def test_citing_an_expired_chunk_is_blocked(self):
+        c = [cite("old#0", "Processing fee ₹199.", effective_to="2026-03-31")]
+        r = rules.check_stale_terms(c, ["old#0"], on=date(2026, 8, 7))
+        assert not r.passed
+        assert r.severity == Severity.BLOCK
+
+    def test_current_chunk_passes(self):
+        c = [cite("new#0", "Processing fee ₹0.")]
+        r = rules.check_stale_terms(c, ["new#0"], on=date(2026, 8, 7))
+        assert r.passed
+
+    def test_reports_what_the_retriever_filtered(self):
+        r = rules.check_stale_terms([], [], dropped_stale=["old#1", "old#2"])
+        assert r.passed
+        assert "2 expired chunk" in r.detail
+
+
+# ---------------------------------------------------------------------------
+# human oversight on credit terms
+# ---------------------------------------------------------------------------
+
+
+class TestCreditTerms:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Your credit limit will be around ₹50,000.",
+            "You're eligible for this.",
+            "The interest rate is zero.",
+            "There's a processing fee.",
+            "You'll be approved.",
+        ],
+    )
+    def test_credit_terminology_forces_confirmation(self, text):
+        _, forced = rules.check_credit_terms(text, ActionType.EXPLAIN, False)
+        assert forced is True, "code must force the flag on regardless of the model"
+
+    def test_quote_terms_action_forces_confirmation(self):
+        _, forced = rules.check_credit_terms(
+            "Here are the numbers.", ActionType.QUOTE_TERMS, False
+        )
+        assert forced is True
+
+    def test_model_cannot_lower_a_flag_it_set(self):
+        """The model saying False on credit content must not win."""
+        result, forced = rules.check_credit_terms(
+            "Your credit limit is ₹50,000.", ActionType.EXPLAIN, False
+        )
+        assert forced is True
+        assert "FORCED" in result.detail
+
+    def test_benign_text_is_left_alone(self):
+        _, forced = rules.check_credit_terms(
+            "I'll stay on the line while you do it.", ActionType.EXPLAIN, False
+        )
+        assert forced is False
+
+
+# ---------------------------------------------------------------------------
+# PII
+# ---------------------------------------------------------------------------
+
+
+class TestPII:
+    @pytest.mark.parametrize(
+        "text,kind",
+        [
+            ("My number is 98450 33127", "phone"),
+            ("PAN is ABCDE1234F", "pan"),
+            ("Aadhaar 1234 5678 9012", "aadhaar"),
+            ("write to me at a.b+x@example.co.in", "email"),
+            ("the OTP is 483920", "otp"),
+            ("card 4111 1111 1111 1111", "card"),
+        ],
+    )
+    def test_each_pii_kind_is_detected_and_masked(self, text, kind):
+        r = redact(text)
+        assert kind in r.found, f"{kind} not detected in {text!r}"
+        assert not scan(r.text), f"PII survived redaction: {r.text!r}"
+
+    def test_clean_text_is_untouched(self):
+        r = redact("There's a ₹250 late fee if an instalment is missed.")
+        assert not r.changed
+        assert "₹250" in r.text
+
+    def test_redaction_is_idempotent(self):
+        once = redact("call me on 98450 33127").text
+        assert redact(once).text == once
+
+    def test_amounts_are_not_mistaken_for_phone_numbers(self):
+        """₹60,000 and ₹1,50,000 must survive — masking real product figures
+        would break the grounding check for no benefit."""
+        r = redact("Limits run from ₹5,000 to ₹1,50,000, max cart ₹60,000.")
+        assert "5,000" in r.text and "60,000" in r.text
+
+
+# ---------------------------------------------------------------------------
+# consent
+# ---------------------------------------------------------------------------
+
+
+class TestConsent:
+    def test_missing_consent_is_blocking(self):
+        r = rules.check_consent(False)
+        assert not r.passed
+        assert r.severity == Severity.BLOCK
+        assert r.enforced_by == "code"
+
+    def test_consent_present_passes(self):
+        assert rules.check_consent(True).passed
+
+
+# ---------------------------------------------------------------------------
+# opt-out
+# ---------------------------------------------------------------------------
+
+
+class TestOptOut:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "No, I'm not interested.",
+            "please don't call me about this again",
+            "Do not call me",
+            "stop calling",
+            "remove me from your list",
+        ],
+    )
+    def test_opt_out_phrasings_are_detected(self, text):
+        assert detect_opt_out(text)
+
+    def test_ordinary_hesitation_is_not_an_opt_out(self):
+        assert not detect_opt_out("Let me think about it and get back to you.")
+
+
+# ---------------------------------------------------------------------------
+# routing
+# ---------------------------------------------------------------------------
+
+
+class TestRouting:
+    def test_routine_turn_stays_cheap(self):
+        tier, trigger = route_nba(
+            RouteContext(intent=Intent.KYC_STEPS, confidence=0.9, dropoff_risk=0.1,
+                         text="what documents do I need")
+        )
+        assert tier == ModelTier.STANDARD
+        assert trigger is None
+
+    def test_sensitive_intent_escalates(self):
+        tier, trigger = route_nba(
+            RouteContext(intent=Intent.ELIGIBILITY, confidence=0.9, dropoff_risk=0.1,
+                         text="will I qualify")
+        )
+        assert tier == ModelTier.HIGH
+        assert "sensitive_intent" in trigger
+
+    def test_high_dropoff_escalates(self):
+        tier, trigger = route_nba(
+            RouteContext(intent=Intent.SMALLTALK, confidence=0.9, dropoff_risk=0.85,
+                         text="let me think about it")
+        )
+        assert tier == ModelTier.HIGH
+        assert "high_dropoff_risk" in trigger
+
+    def test_low_confidence_escalates(self):
+        tier, _ = route_nba(
+            RouteContext(intent=Intent.OTHER, confidence=0.2, dropoff_risk=0.0, text="hm")
+        )
+        assert tier == ModelTier.HIGH
+
+    def test_kb_style_prose_does_not_escalate_on_its_own(self):
+        """Regression: routing once read retrieved KB text, so every turn hit the
+        120B model because the KB is *about* fees and eligibility. Routing must
+        key on the customer's words only."""
+        tier, trigger = route_nba(
+            RouteContext(intent=Intent.SMALLTALK, confidence=0.95, dropoff_risk=0.05,
+                         text="okay, thanks")
+        )
+        assert tier == ModelTier.STANDARD, trigger
+
+    def test_credit_terminology_detection(self):
+        assert mentions_credit_terms("what's the interest rate")
+        assert not mentions_credit_terms("what time do you close")
+
+
+# ---------------------------------------------------------------------------
+# CRM patch coercion
+# ---------------------------------------------------------------------------
+
+
+class TestPatchCoercion:
+    def test_named_kyc_step_becomes_an_integer(self):
+        """The live run returned 'aadhaar_verified' for an integer column."""
+        assert _coerce_patch_value("kyc_last_step", "aadhaar_verified") == 3
+
+    def test_numeric_string_becomes_an_integer(self):
+        assert _coerce_patch_value("kyc_last_step", "step 4") == 4
+
+    def test_uncoercible_value_is_dropped_not_written(self):
+        assert _coerce_patch_value("kyc_last_step", "somewhere in the middle") is _DROP
+
+    def test_bool_strings_coerce(self):
+        assert _coerce_patch_value("do_not_call", "true") is True
+        assert _coerce_patch_value("do_not_call", "no") is False
+
+    def test_correct_types_pass_through(self):
+        assert _coerce_patch_value("kyc_status", "completed") == "completed"
+        assert _coerce_patch_value("kyc_last_step", 5) == 5
