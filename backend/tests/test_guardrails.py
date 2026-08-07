@@ -14,7 +14,7 @@ import pytest
 from app.agents.crm import _coerce_patch_value, _DROP, detect_opt_out
 from app.guardrails import rules
 from app.guardrails.pii import redact, scan
-from app.llm.client import normalise_currency
+from app.llm.client import is_probably_hallucination, normalise_currency
 from app.llm.router import RouteContext, route_nba, mentions_credit_terms
 from app.schemas import ActionType, Citation, Intent, ModelTier, Severity
 
@@ -267,6 +267,105 @@ class TestRouting:
 # ---------------------------------------------------------------------------
 # CRM patch coercion
 # ---------------------------------------------------------------------------
+
+
+class TestFabricatedActions:
+    """The assistant has no side effects. Claiming otherwise makes the human
+    agent tell the customer something false."""
+
+    def test_the_real_regression_claimed_sending_an_email(self):
+        """Observed live: 'Sure Arun, I've just sent you an email with all the
+        Pay-in-3 details and your account info. Please check your inbox.'"""
+        r = rules.check_no_fabricated_actions(
+            "Sure Arun, I've just sent you an email with all the Pay-in-3 "
+            "details. Please check your inbox."
+        )
+        assert not r.passed
+        assert r.severity == Severity.BLOCK
+        assert r.enforced_by == "code"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "I've sent you the details.",
+            "I have emailed the fee breakdown.",
+            "I've updated your account.",
+            "Your application has been submitted.",
+            "Check your inbox for the link.",
+            "It's on its way to you now.",
+            "I just sent you an SMS.",
+        ],
+    )
+    def test_completed_action_claims_are_blocked(self, text):
+        assert not rules.check_no_fabricated_actions(text).passed
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "I'll send that across once we're done.",
+            "I can email the fee breakdown if that helps.",
+            "You'll see your limit in the app once KYC is complete.",
+            "There's a ₹250 late fee if an instalment is missed.",
+            "Would it help if I sent the details in writing?",
+        ],
+    )
+    def test_future_and_offered_actions_are_fine(self, text):
+        assert rules.check_no_fabricated_actions(text).passed
+
+
+class TestHallucinationFilter:
+    """Whisper answers silence with training priors, not with nothing.
+
+    Anything accepted here enters conversation history and is fed to the intent
+    classifier on every later turn, so filler is not a cosmetic problem.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Thank you.",
+            "thank you very much",
+            "Thanks for watching!",
+            "Please subscribe",
+            "Bye.",
+            "You",
+            "I'm not sure.",
+            "Spoken up.",
+            "[MUSIC]",
+            "(upbeat music)",
+            "...",
+            "",
+            "  ",
+        ],
+    )
+    def test_known_filler_is_dropped(self, text):
+        assert is_probably_hallucination(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "I have stuck with the KYC updation.",
+            "What's the catch, where are you actually making money?",
+            "Thank you, that's much clearer than I expected.",
+            "No, I'm not interested. Please don't call me again.",
+            "Is there a processing fee?",
+        ],
+    )
+    def test_real_utterances_survive(self, text):
+        assert not is_probably_hallucination(text)
+
+    def test_thank_you_inside_a_real_sentence_survives(self):
+        """Only a bare filler phrase is dropped — substring matching here would
+        silently delete genuine customer turns."""
+        assert not is_probably_hallucination("Thank you, that answers it.")
+
+    def test_long_transcript_from_a_sub_second_clip_is_rejected(self):
+        assert is_probably_hallucination(
+            "Thanks for watching and please subscribe to the channel", 0.4
+        )
+
+    def test_short_clip_with_short_plausible_text_is_kept(self):
+        assert not is_probably_hallucination("No thanks", 0.5)
 
 
 class TestSpeechNormalisation:

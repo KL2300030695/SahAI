@@ -290,6 +290,63 @@ def check_stale_terms(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 7. no fabricated completed actions
+# ---------------------------------------------------------------------------
+
+# The assistant has no side effects: it cannot send email or SMS, look anything
+# up, or alter an account. A suggestion asserting it already did is worse than
+# a wrong fee -- the human agent reads it aloud, the customer waits for an email
+# that never arrives, and trust is gone.
+#
+# Observed live: "Sure Arun, I've just sent you an email with all the Pay-in-3
+# details and your account info. Please check your inbox."
+#
+# The prompt now forbids this, but a prompt is a request. This is the check.
+_COMPLETED_ACTION = re.compile(
+    r"\b(?:"
+    r"i(?:'ve| have)\s+(?:just\s+)?(?:sent|emailed|texted|messaged|shared|"
+    r"updated|processed|submitted|applied|activated|approved|booked|added|"
+    r"scheduled|arranged)"
+    r"|(?:i|we)\s+(?:just\s+)?sent\s+you"
+    r"|(?:has|have)\s+been\s+(?:sent|emailed|updated|processed|activated|"
+    r"submitted|approved)"
+    r"|check\s+your\s+(?:inbox|email|messages|sms)"
+    r"|it(?:'s| is)\s+(?:on\s+its\s+way|been\s+sent)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def check_no_fabricated_actions(say: str) -> CheckResult:
+    """Block a suggestion that claims an action was already carried out."""
+    match = _COMPLETED_ACTION.search(say or "")
+    if match:
+        return CheckResult(
+            name=CheckName.NO_FABRICATED_ACTIONS,
+            passed=False,
+            detail=(
+                f"Claims a completed action ({match.group(0)!r}). The assistant "
+                "has no side effects — it cannot send, update, or submit "
+                "anything. Saying so to a customer is a false promise."
+            ),
+            enforced_by="code",
+            severity=Severity.BLOCK,
+        )
+    return CheckResult(
+        name=CheckName.NO_FABRICATED_ACTIONS,
+        passed=True,
+        detail="No claim of a completed action.",
+        enforced_by="code",
+        severity=Severity.BLOCK,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8. injection screen (result of the TINY model, recorded as a check)
+# ---------------------------------------------------------------------------
+
+
 def check_injection(flagged: bool, score: float = 0.0) -> CheckResult:
     return CheckResult(
         name=CheckName.INJECTION_SCREEN,

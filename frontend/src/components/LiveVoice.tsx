@@ -35,6 +35,9 @@ export default function LiveVoice({
   const [status, setStatus] = useState<string>("");
   const [sttError, setSttError] = useState<string | null>(null);
   const [utterances, setUtterances] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const [customerTurns, setCustomerTurns] = useState(0);
+  const [agentTurns, setAgentTurns] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const speech = useSpeech();
 
@@ -59,10 +62,14 @@ export default function LiveVoice({
           break;
         case "transcript":
           setStatus("");
+          if (msg.turn.speaker === "agent") setAgentTurns((n) => n + 1);
+          else setCustomerTurns((n) => n + 1);
           onTurn(msg.turn);
           break;
         case "transcript_skipped":
-          setStatus("(silence — skipped)");
+          // Whisper answered silence with filler; it never reaches history.
+          setSkipped((n) => n + 1);
+          setStatus("no speech — skipped");
           break;
         case "thinking":
           setStatus("analysing…");
@@ -166,19 +173,53 @@ export default function LiveVoice({
                 onClick={() => setSpeaker(s)}
                 className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium capitalize transition ${
                   speaker === s
-                    ? "bg-sky-600 text-white"
+                    ? s === "customer"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-600 text-white"
                     : "border border-slate-800 text-slate-400 hover:bg-slate-800"
                 }`}
               >
                 {s}
+                {s === "customer" && (
+                  <span className="ml-1 opacity-70">· assists</span>
+                )}
               </button>
             ))}
           </div>
-          <p className="mt-1 text-[10px] leading-snug text-slate-600">
-            Only customer turns trigger the pipeline — agent turns are recorded
-            as context. Whisper does not diarise, so this is stated rather than
-            guessed.
-          </p>
+
+          {speaker === "agent" ? (
+            <div className="mt-1.5 rounded border border-amber-800/50 bg-amber-950/30 px-2 py-1.5">
+              <p className="text-[11px] leading-snug text-amber-200/90">
+                <strong>Co-pilot is listening only.</strong> Agent turns are
+                recorded as context and produce no suggestion. Switch to{" "}
+                <button
+                  onClick={() => setSpeaker("customer")}
+                  className="underline hover:text-amber-100"
+                >
+                  Customer
+                </button>{" "}
+                to get assistance.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-1 text-[10px] leading-snug text-slate-600">
+              Customer turns drive the pipeline; agent turns are context only.
+              Whisper does not diarise, so this is stated rather than guessed.
+            </p>
+          )}
+
+          {/* If everything so far is agent-side, the user has almost certainly
+              left the toggle wrong and is waiting for a suggestion that will
+              never come. Say so rather than sitting silent. */}
+          {agentTurns >= 2 && customerTurns === 0 && (
+            <div className="mt-1.5 rounded border border-rose-800/50 bg-rose-950/30 px-2 py-1.5">
+              <p className="text-[11px] leading-snug text-rose-200/90">
+                {agentTurns} turns captured, none marked as the customer — so
+                nothing has triggered the co-pilot yet. If you are demoing solo,
+                you are the customer.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* level meter */}
@@ -258,7 +299,12 @@ export default function LiveVoice({
         </label>
 
         <div className="flex justify-between border-t border-slate-800 pt-2 text-[10px] text-slate-600">
-          <span>{utterances} utterance{utterances === 1 ? "" : "s"} sent</span>
+          <span>
+            {utterances} sent · {customerTurns} customer · {agentTurns} agent
+            {skipped > 0 && (
+              <span className="text-slate-500"> · {skipped} silence</span>
+            )}
+          </span>
           <span>segmented on ~900ms silence</span>
         </div>
       </div>

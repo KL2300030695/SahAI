@@ -55,7 +55,7 @@ from app.crm.db import (
     session_scope,
 )
 from app.crm.models import Call, Customer
-from app.llm.client import get_llm
+from app.llm.client import get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
 from app.schemas import Intent, ModelTier, Speaker, TranscriptTurn
@@ -528,13 +528,17 @@ async def ws_live(ws: WebSocket, call_id: str) -> None:
                 0.0,
             )
 
-            # Whisper hallucinates filler on silence ("Thank you.", "Bye.") when
-            # handed a near-empty clip. Dropping very short transcripts keeps
-            # those out of the conversation history, where they would otherwise
-            # skew intent on every later turn.
-            if len(transcript) < 3:
+            # Whisper answers silence with its training priors, not with
+            # nothing. Filler that reaches history is fed to the intent
+            # classifier on every later turn, so it must be dropped here.
+            if is_probably_hallucination(transcript, seconds):
                 await ws.send_json(
-                    {"type": "transcript_skipped", "text": transcript, "seconds": seconds}
+                    {
+                        "type": "transcript_skipped",
+                        "text": transcript,
+                        "seconds": seconds,
+                        "reason": "no speech detected — filtered as silence filler",
+                    }
                 )
                 continue
 
@@ -626,7 +630,22 @@ def finalise(call_id: str) -> dict:
     if not live.history:
         raise HTTPException(400, "no turns processed yet")
 
-    data = _load_transcript(call_id)
+    # A live voice call has no seed transcript file -- its transcript is whatever
+    # the microphone produced. Looking one up by call_id 404s for every live
+    # call, which then also tears down the audio socket. Fall back to the turns
+    # actually processed.
+    #
+    # Scripted calls still prefer the seed file: `live.history` holds only the
+    # customer turns the pipeline ran on, whereas the file has the agent side
+    # too, and the summary is better for having both.
+    try:
+        transcript = _turns(_load_transcript(call_id))
+    except HTTPException:
+        transcript = list(live.history)
+
+    if not transcript:
+        raise HTTPException(400, "no transcript to summarise")
+
     orch = get_orchestrator()
 
     with session_scope() as s:
@@ -635,7 +654,7 @@ def finalise(call_id: str) -> dict:
 
     result = orch.finalise_call(
         call_id=call_id,
-        transcript=_turns(data),
+        transcript=transcript,
         intents_seen=live.intents_seen,
         max_dropoff_risk=live.max_dropoff_risk,
         meter=live.meter,
@@ -665,6 +684,10 @@ def finalise(call_id: str) -> dict:
                 [json.loads(c.model_dump_json()) for c in result.guardrail.checks]
             )
             call.cost_usd = result.ledger.total_usd
+            # A live call's transcript exists only in memory until now.
+            call.transcript_json = json.dumps(
+                [json.loads(t.model_dump_json()) for t in transcript]
+            )
 
     payload["frontier_usd"] = live.meter.frontier_baseline_usd()
     return payload
@@ -846,8 +869,12 @@ async def audio_turn(
         0.0,
     )
 
-    if len(text) < 3:
-        raise HTTPException(422, f"nothing usable transcribed (got {text!r})")
+    if is_probably_hallucination(text, duration):
+        raise HTTPException(
+            422,
+            f"No speech detected in that clip — Whisper returned {text!r}, which "
+            "is silence filler rather than a real utterance.",
+        )
 
     turn = TranscriptTurn(
         index=len(live.history),

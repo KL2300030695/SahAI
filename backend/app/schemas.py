@@ -272,6 +272,7 @@ class CheckName(str, Enum):
     INJECTION_SCREEN = "injection_screen"
     GROUNDING = "grounding"
     NO_AUTONOMOUS_CREDIT_TERMS = "no_autonomous_credit_terms"
+    NO_FABRICATED_ACTIONS = "no_fabricated_actions"
     PII_REDACTION = "pii_redaction"
     NO_STALE_TERMS = "no_stale_terms"
     GOAL_ALIGNMENT = "goal_alignment"

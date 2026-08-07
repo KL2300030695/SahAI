@@ -107,12 +107,13 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
             redaction.text, inp.action_type, requires_human_confirmation=True
         )
         checks.append(credit_result)
+        checks.append(rules.check_no_fabricated_actions(redaction.text))
 
         if meter is not None:
             meter.record_local(
                 f"{self.name}:code",
                 turn_index=turn_index,
-                note="6 deterministic checks",
+                note="7 deterministic checks",
             )
 
         code_blocked = [

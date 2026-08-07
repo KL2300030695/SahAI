@@ -96,6 +96,67 @@ def normalise_currency(text: str) -> str:
     return _SPLIT_NUMBER.sub(r"\1\2", _DOLLAR.sub(repl, text))
 
 
+# ---------------------------------------------------------------------------
+# Hallucination filtering
+# ---------------------------------------------------------------------------
+
+# Whisper does not return "nothing" for silence -- it returns its training
+# priors. Fed room tone, a breath, or line noise it emits confident filler,
+# overwhelmingly the sign-offs that end the YouTube captions it was trained on.
+#
+# Observed in a real session: a transcript pane filled with "Thank you.",
+# "I'm not sure." and "Spoken up." for turns where nobody had spoken.
+#
+# This is not cosmetic. Every accepted turn enters conversation history and is
+# fed to the intent classifier on every subsequent turn, so a run of phantom
+# filler drags classification toward `smalltalk` and buries the real question.
+# A length check alone cannot catch it: "Thank you." is ten characters.
+_HALLUCINATED_FILLER = {
+    "thank you", "thank you very much", "thanks", "thanks for watching",
+    "thank you for watching", "thanks for watching!", "please subscribe",
+    "subscribe", "like and subscribe", "bye", "bye bye", "goodbye",
+    "you", "yeah", "uh", "um", "hmm", "mm", "mhm", "okay", "ok", "so",
+    "i'm not sure", "im not sure", "spoken up", "silence", "no",
+    "music", "applause", "laughter", "beep", "blank audio", "inaudible",
+    "transcription by castingwords", "the end", "end of transcript",
+}
+
+# Bracketed sound tags: [MUSIC], (upbeat music), ♪ ... ♪
+_SOUND_TAG = re.compile(r"^\s*[\[\(♪].*[\]\)♪]\s*$")
+_PUNCT_ONLY = re.compile(r"^[\W_]*$", re.UNICODE)
+
+
+def is_probably_hallucination(text: str, audio_seconds: float = 0.0) -> bool:
+    """True when a transcript is almost certainly Whisper filling in silence.
+
+    Deliberately conservative about *what* it matches but not about *when*: it
+    only rejects an utterance whose entire content is a known filler phrase, so
+    a customer saying "thank you, that's much clearer" is untouched while a bare
+    "Thank you." on a silent clip is dropped.
+
+    Dropping a real one-word acknowledgement costs nothing -- it carries no
+    intent and would route to `smalltalk` anyway. Accepting a phantom one
+    corrupts every classification that follows.
+    """
+    stripped = (text or "").strip()
+    if len(stripped) < 3:
+        return True
+    if _PUNCT_ONLY.match(stripped) or _SOUND_TAG.match(stripped):
+        return True
+
+    normalised = re.sub(r"[^\w\s']", "", stripped).strip().lower()
+    normalised = re.sub(r"\s+", " ", normalised)
+    if normalised in _HALLUCINATED_FILLER:
+        return True
+
+    # Whisper cannot produce a real sentence from a fraction of a second; a long
+    # transcript off a very short clip is fabricated.
+    if 0 < audio_seconds < 0.8 and len(stripped) > 12:
+        return True
+
+    return False
+
+
 @dataclass
 class LLMResponse:
     text: str
