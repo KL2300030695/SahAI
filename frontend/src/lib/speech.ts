@@ -29,6 +29,9 @@ import { useCallback, useSyncExternalStore } from "react";
 /** Silence the microphone for this long after the voice stops. */
 const ECHO_TAIL_MS = 400;
 
+/** The same, after an interruption — see `cancel`. */
+const BARGE_IN_TAIL_MS = 120;
+
 /** Rough speaking rate, used only to bound how long the mic can stay muted. */
 const WORDS_PER_SECOND = 2.6;
 
@@ -64,6 +67,19 @@ class VoiceEngine {
    * so a dropped `onend` event unmutes on its own instead of deafening the call.
    */
   private quietUntil = 0;
+
+  /**
+   * Set while an interruption is being handled.
+   *
+   * `speechSynthesis.cancel()` fires the cancelled utterance's `onend`
+   * *asynchronously*, and that handler also sets the quiet window — so the
+   * short barge-in tail was written, then overwritten by the long one a moment
+   * later. The microphone stayed deaf for the full 400 ms either way, which is
+   * four hundred milliseconds of the customer's interruption thrown on the
+   * floor. Measured, not reasoned about: both paths reported an identical
+   * seven ticks of silence.
+   */
+  private bargingIn = false;
 
   constructor() {
     if (!this.supported) return;
@@ -144,6 +160,7 @@ class VoiceEngine {
     const clean = (text ?? "").trim();
     if (!clean) return;
 
+    this.bargingIn = false;
     window.speechSynthesis.cancel();
     this.stopHeartbeat();
 
@@ -165,7 +182,9 @@ class VoiceEngine {
       this.startHeartbeat();
     };
     const done = () => {
-      this.quietUntil = Date.now() + ECHO_TAIL_MS;
+      this.quietUntil =
+        Date.now() + (this.bargingIn ? BARGE_IN_TAIL_MS : ECHO_TAIL_MS);
+      this.bargingIn = false;
       this.stopHeartbeat();
       this.emit({ speaking: false });
     };
@@ -175,10 +194,23 @@ class VoiceEngine {
     window.speechSynthesis.speak(u);
   }
 
-  cancel() {
+  /**
+   * Stop reading.
+   *
+   * `bargeIn` shortens the deaf window that follows. The normal tail exists to
+   * let the speaker finish draining before the microphone reopens; when the
+   * customer has interrupted, every one of those milliseconds is a word of
+   * theirs thrown away. Speech has already been cancelled by then, so there is
+   * far less left to echo — a short tail still covers the audio buffer.
+   */
+  cancel(opts: { bargeIn?: boolean } = {}) {
     if (!this.supported) return;
+    // Set before cancelling: the utterance's own `onend` runs after this and
+    // needs to know which tail applies.
+    this.bargingIn = !!opts.bargeIn;
     window.speechSynthesis.cancel();
-    this.quietUntil = Date.now() + ECHO_TAIL_MS;
+    this.quietUntil =
+      Date.now() + (opts.bargeIn ? BARGE_IN_TAIL_MS : ECHO_TAIL_MS);
     this.stopHeartbeat();
     this.emit({ speaking: false });
   }

@@ -12,11 +12,16 @@ import type { CostLedger, TranscriptTurn, TurnAssist } from "../lib/types";
  * agent is the one talking, so they cannot also be operating a toggle between
  * sentences.
  *
- * The deeper limit is stated rather than designed around. On a real desk the
- * agent wears a headset — the browser hears the agent, and the customer is on
- * the phone line where the browser cannot reach them. Single-microphone capture
- * cannot do two-party attribution at all. It is honest for a speakerphone or a
- * solo demo; the phone path is what works on a real desk.
+ * The deeper limit is stated rather than designed around. One microphone cannot
+ * separate two people in a room, so this assumes a speakerphone or a solo run.
+ * Real two-party attribution needs either a carrier integration, with each leg
+ * on its own track, or a diarizing speech model.
+ *
+ * While the co-pilot reads a suggestion aloud the microphone stops recording,
+ * or the pipeline transcribes its own voice as the customer. It keeps
+ * *listening* though: if the customer talks over it, the reading stops and
+ * recording resumes. A co-pilot that has to be waited out is worse than one
+ * that stays quiet.
  */
 export default function LiveVoice({
   callId,
@@ -126,8 +131,17 @@ export default function LiveVoice({
   }, []);
 
   // Deaf while the co-pilot reads, or the pipeline transcribes its own voice
-  // as the customer and starts answering itself.
-  const mic = useMic({ onUtterance: handleUtterance, gate: voice.micMuted });
+  // as the customer and starts answering itself — but not indifferent to being
+  // interrupted. If the customer starts talking, the co-pilot stops mid-sentence
+  // and the microphone reopens, because the person on the phone outranks it.
+  const mic = useMic({
+    onUtterance: handleUtterance,
+    gate: voice.micMuted,
+    onBargeIn: () => {
+      voice.cancel({ bargeIn: true });
+      setStatus("you were interrupted — listening");
+    },
+  });
   const level = Math.min(100, Math.round(mic.level * 900));
 
   return (
@@ -175,7 +189,7 @@ export default function LiveVoice({
               }}
             >
               {mic.muted
-                ? "muted while I read"
+                ? "reading — talk over me to stop it"
                 : mic.speaking
                   ? "hearing speech"
                   : "quiet"}

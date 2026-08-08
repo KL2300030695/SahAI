@@ -38,6 +38,29 @@ interface Options {
    * is far worse than a missed turn because nothing about it looks wrong.
    */
   gate?: () => boolean;
+  /**
+   * Fires when the customer starts talking over the co-pilot's voice.
+   *
+   * The gate alone is not enough. Muting the microphone stops the pipeline
+   * hearing itself, but it also means an interruption is thrown away while the
+   * co-pilot keeps reading over the person who interrupted — which is exactly
+   * backwards on a live call. Barge-in is the other half: detect the
+   * interruption, stop reading, and start listening.
+   */
+  onBargeIn?: () => void;
+  /**
+   * How much louder than ordinary speech an interruption must be to count
+   * while the co-pilot is reading.
+   *
+   * `getUserMedia` runs with `echoCancellation`, so most of the co-pilot's
+   * voice is already removed from the microphone signal — but not all of it on
+   * open laptop speakers. A multiple of the normal threshold keeps residual
+   * echo from cutting the co-pilot off mid-sentence, which would be far more
+   * visible than a missed interruption.
+   */
+  bargeInFactor?: number;
+  /** Sustained loudness required, so a cough or a door does not trigger it. */
+  bargeInMs?: number;
   /** RMS below this counts as silence. */
   silenceThreshold?: number;
   /** Silence needed to close an utterance. */
@@ -51,6 +74,9 @@ interface Options {
 export function useMic({
   onUtterance,
   gate,
+  onBargeIn,
+  bargeInFactor = 3,
+  bargeInMs = 220,
   silenceThreshold = 0.012,
   silenceMs = 900,
   minUtteranceMs = 400,
@@ -84,6 +110,9 @@ export function useMic({
   onUtteranceRef.current = onUtterance;
   const gateRef = useRef(gate);
   gateRef.current = gate;
+  const onBargeInRef = useRef(onBargeIn);
+  onBargeInRef.current = onBargeIn;
+  const bargeStartRef = useRef(0);
 
   /** Finalise the current recording; `emit` decides whether anyone hears it. */
   const cutSegment = useCallback((emit: boolean) => {
@@ -155,12 +184,27 @@ export function useMic({
       setState((s) => ({ ...s, muted: shutNow, speaking: false, level: 0 }));
     }
     if (shutNow) {
+      // Still listening, just not recording. An interruption has to be clearly
+      // louder than what leaks back from the speakers, and sustained, before it
+      // counts — cutting the co-pilot off mid-word because of its own echo
+      // would be a worse failure than missing a barge-in.
+      if (rms > silenceThreshold * bargeInFactor) {
+        if (!bargeStartRef.current) {
+          bargeStartRef.current = now;
+        } else if (now - bargeStartRef.current > bargeInMs) {
+          bargeStartRef.current = 0;
+          onBargeInRef.current?.(); // stops the voice; the gate opens next tick
+        }
+      } else {
+        bargeStartRef.current = 0;
+      }
       // Keep the silence clock fresh so reopening does not immediately look
       // like the end of a long pause.
       lastVoiceRef.current = now;
       rafRef.current = requestAnimationFrame(tick);
       return;
     }
+    bargeStartRef.current = 0;
 
     const loud = rms > silenceThreshold;
     if (loud) {
@@ -194,6 +238,8 @@ export function useMic({
     silenceMs,
     silenceThreshold,
     startRecorder,
+    bargeInFactor,
+    bargeInMs,
   ]);
 
   const start = useCallback(async () => {
