@@ -119,6 +119,7 @@ export const api = {
     body: {
       // No approver_id: the server takes the identity from the credential.
       decision: "approve" | "reject";
+      send_to_customer?: boolean;
       edited_summary?: string;
       edited_followup_body?: string;
     },
@@ -156,6 +157,20 @@ export const api = {
       { method: "POST", body: fd, headers: authHeaders() },
     ).then(json<any>);
   },
+
+  /** Where an approved follow-up would actually be delivered. */
+  deliveryPreview: (id: string) =>
+    fetch(`/api/calls/${id}/delivery-preview`, { headers: authHeaders() }).then(
+      json<{
+        configured: boolean;
+        customer_email: string;
+        redirect_active: boolean;
+        goes_to_by_default: string;
+        goes_to_if_direct: string;
+        direct_possible: boolean;
+        direct_blocked_reason: string;
+      }>,
+    ),
 
   /** Who the credential says we are, and what it may do. */
   me: () =>

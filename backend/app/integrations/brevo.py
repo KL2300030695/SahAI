@@ -142,6 +142,20 @@ def _html(body: str) -> str:
     )
 
 
+def resolve_recipient(to_email: str, direct: bool = False) -> tuple[str, bool]:
+    """Where a message would actually go, and whether that is a redirect.
+
+    Exposed so the dashboard can show the address *before* the agent clicks
+    rather than reporting it afterwards. Sending to the wrong person is not
+    recoverable by reading a status field once it has happened.
+    """
+    s = get_settings()
+    intended = (to_email or "").strip()
+    redirect = "" if direct else (s.brevo_redirect_to or "").strip()
+    recipient = redirect or intended
+    return recipient, bool(redirect and intended and redirect.lower() != intended.lower())
+
+
 def send_email(
     *,
     to_email: str,
@@ -150,15 +164,34 @@ def send_email(
     body: str,
     approved_by: str,
     call_id: str,
+    direct: bool = False,
 ) -> SendResult:
-    """Deliver one approved follow-up. Never called before the approval gate."""
+    """Deliver one approved follow-up. Never called before the approval gate.
+
+    `direct=True` bypasses BREVO_REDIRECT_TO for this one message, so a real
+    customer can be emailed without turning the safety valve off globally. It is
+    a per-approval decision made by a named human, which is the only level at
+    which "email this actual person" should be decidable.
+    """
     s = get_settings()
     if not enabled():
         return SendResult(False, detail="Brevo is not configured.")
 
     intended = (to_email or "").strip()
-    redirect = (s.brevo_redirect_to or "").strip()
-    recipient = redirect or intended
+    recipient, _ = resolve_recipient(intended, direct)
+    redirect = "" if direct else (s.brevo_redirect_to or "").strip()
+
+    if direct and recipient.lower().endswith((".invalid", ".example", ".test")):
+        # RFC 2606 reserved TLDs cannot resolve. Brevo accepts the request and
+        # the message silently disappears, which looks like a delivered email.
+        return SendResult(
+            False,
+            recipient=recipient,
+            detail=(
+                f"{recipient} is a reserved test address and can never receive "
+                "mail. Set a real address on the customer record first."
+            ),
+        )
 
     if not _EMAIL.match(recipient):
         # Checked before the request so the failure names the cause. A bad

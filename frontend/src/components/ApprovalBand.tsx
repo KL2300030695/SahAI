@@ -41,6 +41,28 @@ export default function ApprovalBand({
   useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null));
   }, []);
+
+  /**
+   * Where this message would actually land.
+   *
+   * Shown before the click, not reported after it. A status field explaining
+   * that an email went to the wrong person is not a remedy — by then it has
+   * arrived. `BREVO_REDIRECT_TO` keeps demo mail out of a stranger's inbox, and
+   * overriding it is a per-approval decision by a named human rather than a
+   * deployment setting.
+   */
+  const [dest, setDest] = useState<{
+    configured: boolean;
+    customer_email: string;
+    redirect_active: boolean;
+    goes_to_by_default: string;
+    direct_possible: boolean;
+    direct_blocked_reason: string;
+  } | null>(null);
+  const [sendDirect, setSendDirect] = useState(false);
+  useEffect(() => {
+    api.deliveryPreview(result.call_id).then(setDest).catch(() => setDest(null));
+  }, [result.call_id]);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +91,7 @@ export default function ApprovalBand({
     try {
       const r = await api.approve(result.call_id, {
         decision,
+        send_to_customer: sendDirect,
         edited_summary: summary,
         edited_followup_body: crm.followup_draft ? body : undefined,
       });
@@ -393,6 +416,78 @@ export default function ApprovalBand({
                     rows={6}
                     className="card w-full px-3 py-2 text-[13px] leading-relaxed"
                   />
+
+                  {/* Where it goes — stated before the click, not after. */}
+                  {dest && (
+                    <div
+                      className="mt-3 rounded-md px-3 py-2.5"
+                      style={{
+                        background: sendDirect ? "var(--halt-wash)" : "var(--paper)",
+                        border: `1px solid ${sendDirect ? "var(--halt)" : "var(--hairline)"}`,
+                      }}
+                    >
+                      {!dest.configured ? (
+                        <p className="text-[12px]" style={{ color: "var(--graphite)" }}>
+                          No email provider configured — this will be approved and
+                          queued, not sent.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="t-label">Delivers to</span>
+                            <span
+                              className="t-data text-right"
+                              style={{ color: sendDirect ? "var(--halt)" : "var(--ink)" }}
+                            >
+                              {sendDirect
+                                ? dest.customer_email || "—"
+                                : dest.goes_to_by_default || "—"}
+                            </span>
+                          </div>
+
+                          {dest.redirect_active && (
+                            <label
+                              className="mt-2 flex cursor-pointer items-start gap-2.5"
+                              title={
+                                dest.direct_possible
+                                  ? "Bypass the redirect for this one message"
+                                  : dest.direct_blocked_reason
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={sendDirect}
+                                disabled={!dest.direct_possible}
+                                onChange={(e) => setSendDirect(e.target.checked)}
+                              />
+                              <span className="text-[12px] leading-snug">
+                                Send to the customer directly
+                                <span
+                                  className="block text-[11.5px]"
+                                  style={{ color: "var(--graphite)" }}
+                                >
+                                  {dest.direct_possible
+                                    ? `Bypasses the safety redirect for this message only. It will reach ${dest.customer_email}.`
+                                    : dest.direct_blocked_reason}
+                                </span>
+                              </span>
+                            </label>
+                          )}
+
+                          {sendDirect && (
+                            <p
+                              className="mt-2 text-[11.5px] leading-snug"
+                              style={{ color: "var(--halt)" }}
+                            >
+                              This reaches a real inbox. Read the message once more
+                              before you sign it.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : optedOut ? (
                 <div

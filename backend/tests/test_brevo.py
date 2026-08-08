@@ -194,3 +194,44 @@ def test_a_failed_send_still_reports_that_it_was_redirected(stub, monkeypatch):
     assert res.ok is False
     assert res.recipient == "me@team.test"
     assert res.redirected is True
+
+
+# --- sending to the actual customer ----------------------------------------
+
+
+def test_direct_bypasses_the_redirect_for_one_message(stub, monkeypatch):
+    """Per-approval, by a named human. "Email this actual person" is not a
+    deployment setting, so it is not a config flag."""
+    _configure(monkeypatch, brevo_redirect_to="me@team.test")
+    res = _send(to_email="arun@example.com", direct=True)
+    assert res.ok and res.redirected is False
+    p = RECEIVED[0]["payload"]
+    assert p["to"][0]["email"] == "arun@example.com"
+    # No [to: …] prefix — it is going where the subject says.
+    assert not p["subject"].startswith("[to:")
+
+
+def test_direct_to_a_reserved_address_is_refused_before_the_request(stub, monkeypatch):
+    """.invalid can never resolve. Brevo accepts the request and the message
+    silently disappears, which looks exactly like a delivered email."""
+    _configure(monkeypatch, brevo_redirect_to="me@team.test")
+    res = _send(to_email="sneha.kulkarni@example.invalid", direct=True)
+    assert res.ok is False
+    assert not RECEIVED
+    assert "reserved test address" in res.detail
+
+
+def test_the_redirect_still_applies_when_direct_is_not_asked_for(stub, monkeypatch):
+    _configure(monkeypatch, brevo_redirect_to="me@team.test")
+    res = _send(to_email="arun@example.com", direct=False)
+    assert res.redirected is True
+    assert RECEIVED[0]["payload"]["to"][0]["email"] == "me@team.test"
+
+
+def test_resolve_recipient_matches_what_send_would_do(stub, monkeypatch):
+    """The preview the dashboard shows must not drift from the real behaviour."""
+    from app.integrations.brevo import resolve_recipient
+
+    _configure(monkeypatch, brevo_redirect_to="me@team.test")
+    assert resolve_recipient("arun@example.com", direct=False) == ("me@team.test", True)
+    assert resolve_recipient("arun@example.com", direct=True) == ("arun@example.com", False)

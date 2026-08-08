@@ -841,6 +841,10 @@ class ApprovalBody(BaseModel):
     edited_summary: Optional[str] = None
     edited_followup_body: Optional[str] = None
     decision: str = "approve"  # approve | reject
+    #: Send to the customer's own address instead of BREVO_REDIRECT_TO. A
+    #: per-approval decision by a named human, rather than a global switch --
+    #: "email this actual person" is not a deployment setting.
+    send_to_customer: bool = False
 
 
 def _blocking_checks(call: Call) -> list[dict]:
@@ -968,9 +972,11 @@ def approve(
                     body=followup["body"],
                     approved_by=principal.audit_name,
                     call_id=call_id,
+                    direct=body.send_to_customer,
                 )
                 delivery = {
                     "attempted": True,
+                    "direct": body.send_to_customer,
                     "ok": res.ok,
                     "recipient": res.recipient,
                     "redirected": res.redirected,
@@ -1288,6 +1294,38 @@ def integrations_sync(call_id: Optional[str] = None,
         "stages": len(stages),
         "firestore_ok": sum(1 for v in fs.values() if v),
         "sheets": url,
+    }
+
+
+@app.get("/api/calls/{call_id}/delivery-preview")
+def delivery_preview(call_id: str) -> dict:
+    """Where an approved follow-up would go, before anyone clicks approve.
+
+    Reporting the recipient only in the response is too late: sending to the
+    wrong person is not undone by reading a status field afterwards.
+    """
+    with session_scope() as s:
+        call = s.get(Call, call_id)
+        if not call:
+            raise HTTPException(404, "call not found")
+        customer = s.get(Customer, call.customer_id)
+        address = (getattr(customer, "email", "") or "").strip()
+
+    redirected_to, is_redirected = brevo.resolve_recipient(address, direct=False)
+    reserved = address.lower().endswith((".invalid", ".example", ".test"))
+    return {
+        "configured": brevo.enabled(),
+        "customer_email": address,
+        "redirect_active": is_redirected,
+        "goes_to_by_default": redirected_to,
+        "goes_to_if_direct": address,
+        # A reserved TLD cannot receive mail, so offering "send direct" without
+        # saying so would produce a send that looks fine and arrives nowhere.
+        "direct_possible": bool(address) and not reserved,
+        "direct_blocked_reason": (
+            f"{address} is a reserved test address and can never receive mail."
+            if reserved else ("No email on this customer record." if not address else "")
+        ),
     }
 
 
