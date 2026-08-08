@@ -52,7 +52,7 @@ def _isolated_database():
 
 
 @pytest.fixture(autouse=True)
-def _no_external_writes(monkeypatch):
+def _no_external_writes(monkeypatch, request):
     """Force every outbound mirror off for the duration of each test.
 
     Patching `enabled()` rather than the config means it holds regardless of
@@ -64,7 +64,13 @@ def _no_external_writes(monkeypatch):
     # Brevo actually delivers email. It was added after this fixture was written
     # and was not covered by it -- so a machine with BREVO_API_KEY set would have
     # sent real messages to seeded customers on every test run.
-    monkeypatch.setattr(brevo, "enabled", lambda: False, raising=True)
+    #
+    # test_brevo.py is exempt: it is the module that exercises the sender, and it
+    # already points API_URL at a local stub server, so it never reaches Brevo.
+    # Gagging it there would leave eight tests passing while asserting nothing --
+    # the failure mode this whole file exists to prevent.
+    if request.module.__name__.rsplit(".", 1)[-1] != "test_brevo":
+        monkeypatch.setattr(brevo, "enabled", lambda: False, raising=True)
     yield
 
 

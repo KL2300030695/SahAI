@@ -162,3 +162,23 @@ def test_unconfigured_is_a_no_op_not_an_error(monkeypatch):
     assert brevo.enabled() is False
     res = _send()
     assert res.ok is False and "not configured" in res.detail
+
+
+def test_an_ip_restriction_is_not_mislabelled_a_sender_problem(stub, monkeypatch):
+    """Brevo's IP-block message also contains the word "unrecognised".
+
+    Order matters: the sender rule matches that word too, so without the more
+    specific case winning, a network restriction sends the reader to Senders &
+    IP to re-verify an address that was never the problem.
+    """
+    _configure(monkeypatch)
+    BEHAVIOUR.update({"status": 401, "body": {
+        "message": "We have detected you are using an unrecognised IP address "
+                   "45.249.79.46. If you performed this action make sure to add "
+                   "the new IP address in this link: ...",
+        "code": "unauthorized"}})
+    res = _send()
+    assert res.ok is False
+    assert "45.249.79.46" in res.detail
+    assert "authorised_ips" in res.detail
+    assert "Senders & IP" not in res.detail

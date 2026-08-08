@@ -91,6 +91,21 @@ def _explain(e: BaseException) -> str:
         return f"{type(e).__name__}: {e}"[:300]
 
     low = body.lower()
+    # Checked before the sender rule: Brevo's IP message also contains the word
+    # "unrecognised", so the more specific case has to win or a network
+    # restriction gets reported as a sender problem and sends the reader to
+    # the wrong console page entirely.
+    if "ip address" in low and ("unrecognised" in low or "unrecognized" in low):
+        import re as _re
+
+        ip = _re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", body)
+        where = f" ({ip.group(1)})" if ip else ""
+        return (
+            f"Brevo is blocking this machine's IP{where}. The key is valid; the "
+            "address is not on the allow-list. Authorise it at "
+            "app.brevo.com/security/authorised_ips, or disable IP restriction. "
+            f"— {body}"
+        )
     if "sender" in low and ("not valid" in low or "unrecognised" in low or "unrecognized" in low):
         return (
             "Brevo does not recognise the sender address. Verify "
