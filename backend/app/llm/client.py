@@ -97,6 +97,70 @@ def normalise_currency(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Domain vocabulary Whisper reliably mangles
+# ---------------------------------------------------------------------------
+
+#: Whisper is primed with these terms via STT_PROMPT, which biases it without
+#: guaranteeing anything. Observed live: "I don't have a Adharkand" for "I don't
+#: have an Aadhaar card".
+#:
+#: That single word broke the turn twice over. Retrieval lost its strongest
+#: signal, and -- worse -- the reasoning model could not tell what was being
+#: asked, so it read a customer saying they lack Aadhaar as a general question
+#: about KYC and recited the onboarding steps at them.
+#:
+#: Only entries that are not English words in their own right. "Civil" for
+#: CIBIL and "pan" for PAN are deliberately absent: correcting a real word on
+#: the chance it was meant as jargon would corrupt ordinary sentences, which is
+#: a worse failure than leaving one term mangled.
+_MISHEARD: dict[str, str] = {
+    # Aadhaar — by far the most mangled, and the most consequential
+    "adharkand": "Aadhaar card",
+    "aadharkand": "Aadhaar card",
+    "adhaarkand": "Aadhaar card",
+    "adhar": "Aadhaar",
+    "aadhar": "Aadhaar",
+    "adhaar": "Aadhaar",
+    "aadaar": "Aadhaar",
+    "aadar": "Aadhaar",
+    "adharcard": "Aadhaar card",
+    "aadharcard": "Aadhaar card",
+    # the product itself
+    "payflex": "PayFlex",
+    "pay flex": "PayFlex",
+    "pay in three": "Pay-in-3",
+    "pay in 3": "Pay-in-3",
+    "payin3": "Pay-in-3",
+    # onboarding vocabulary
+    "e kyc": "e-KYC",
+    "ekyc": "e-KYC",
+    "kyc": "KYC",
+    "enach": "e-NACH",
+    "e nach": "e-NACH",
+    "otp": "OTP",
+    "upi": "UPI",
+}
+
+_MISHEARD_RE = re.compile(
+    r"\b(" + "|".join(sorted(map(re.escape, _MISHEARD), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def correct_domain_terms(text: str) -> str:
+    """Repair domain words the recogniser garbled.
+
+    Whole-word only, and never applied to a term that is also ordinary English.
+    A transcript is the input to every downstream stage, so a wrong word here
+    becomes a wrong intent, a failed retrieval and a confidently wrong
+    suggestion — it is the cheapest place in the pipeline to be correct.
+    """
+    if not text:
+        return text
+    return _MISHEARD_RE.sub(lambda m: _MISHEARD[m.group(0).lower()], text)
+
+
+# ---------------------------------------------------------------------------
 # Hallucination filtering
 # ---------------------------------------------------------------------------
 
@@ -529,7 +593,7 @@ class LLMClient:
         )
         text = getattr(result, "text", "") or ""
         duration = float(getattr(result, "duration", 0.0) or 0.0)
-        return normalise_currency(text.strip()), duration
+        return correct_domain_terms(normalise_currency(text.strip())), duration
 
     def transcribe(self, file_path: str) -> tuple[str, float]:
         """Path-based convenience wrapper over `transcribe_bytes`."""

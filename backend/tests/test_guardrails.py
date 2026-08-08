@@ -785,3 +785,53 @@ def test_it_catches_the_topic_being_invented_from_the_crm_record():
         "You wanted to know about Aadhaar verification.", "hello can you hear me"
     )
     assert not r.passed
+
+
+# ---------------------------------------------------------------------------
+# Domain vocabulary the recogniser garbles
+#
+# Observed live: "Hello, I don't have a Adharkand" for "…an Aadhaar card".
+# One word, and the turn failed twice — retrieval lost its strongest signal,
+# and the reasoning model could not tell what was being asked, so it read a
+# customer saying they lack Aadhaar as a general KYC question and recited the
+# onboarding steps at them.
+# ---------------------------------------------------------------------------
+
+from app.llm.client import correct_domain_terms
+
+
+def test_the_observed_mishearing_is_repaired():
+    assert (
+        correct_domain_terms("Hello, I don't have a Adharkand.")
+        == "Hello, I don't have a Aadhaar card."
+    )
+
+
+def test_common_aadhaar_spellings_are_normalised():
+    for variant in ("adhar", "aadhar", "adhaar", "aadar"):
+        assert "Aadhaar" in correct_domain_terms(f"I have no {variant} yet")
+
+
+def test_product_and_onboarding_terms_are_normalised():
+    assert "Pay-in-3" in correct_domain_terms("tell me about pay in three")
+    assert "e-KYC" in correct_domain_terms("do the e kyc now")
+    assert "OTP" in correct_domain_terms("send the otp")
+
+
+def test_ordinary_english_is_left_alone():
+    """The entries deliberately exclude real words.
+
+    "Civil" for CIBIL and "pan" for PAN are absent: correcting a real word on
+    the chance it was meant as jargon corrupts ordinary sentences, which is a
+    worse failure than leaving one term mangled.
+    """
+    for sentence in (
+        "I need a new frying pan",
+        "we had a civil dispute last year",
+        "the pan was still hot",
+    ):
+        assert correct_domain_terms(sentence) == sentence
+
+
+def test_it_matches_whole_words_only():
+    assert correct_domain_terms("Adharkandan is a surname") == "Adharkandan is a surname"
