@@ -8,7 +8,7 @@ to say — with every figure in it traced back to the clause it came from.
 It never speaks to the customer, and it cannot write to a customer record on its
 own. Both of those are enforced in code, not asked for in a prompt.
 
-**Six agents · five open-weights models · eight guardrails · $0.0038 per call.**
+**Six agents · five open-weights models · eight guardrails · $0.0037 per call.**
 
 ---
 
@@ -228,19 +228,19 @@ choosing different words, not a human dismissing a warning.
 
 ## Cost
 
-**A full call costs $0.0038 (₹0.31) — a measured 55× reduction.**
+**A full call costs $0.0037 (₹0.31) — a measured 55× reduction.**
 
 Every figure below comes from the `usage` field of real API responses, priced by
 `backend/app/config.py` and persisted per decision. Nothing is estimated.
 
 | Seed scenario | Stages | Tokens | SahAI | Same tokens, one frontier mega-prompt | |
 |---|---:|---:|---:|---:|---:|
-| `call-001` won / hidden charges | 47 | 33,615 | $0.004306 | $0.242400 | **56×** |
-| `call-002` dropped / Aadhaar | 48 | 31,527 | $0.004592 | $0.219100 | **48×** |
-| `call-003` won / credit score | 54 | 34,359 | $0.004270 | $0.242300 | **57×** |
-| `call-004` dropped / not interested | 31 | 16,101 | $0.001860 | $0.112600 | **61×** |
+| `call-001` won / hidden charges | 47 | 32,962 | $0.004148 | $0.236570 | **57×** |
+| `call-002` dropped / Aadhaar | 48 | 31,527 | $0.004592 | $0.219055 | **48×** |
+| `call-003` won / credit score | 54 | 34,359 | $0.004270 | $0.242275 | **57×** |
+| `call-004` dropped / not interested | 31 | 16,101 | $0.001860 | $0.112565 | **61×** |
 
-The four scenarios average **$0.0038 (₹0.31)** at **55×**. Across 24 measured
+The four scenarios average **$0.0037 (₹0.31)** at **55×**. Across 24 measured
 calls including shorter live-mic sessions the median is **53×**. The seed scenarios above are full-length
 calls and sit at the expensive end, which is the honest number to quote.
 
@@ -254,9 +254,9 @@ Where the money goes, across all 22:
 | safety | 48 | 54,122 | 0.005566 | 13.5% |
 | cheap | 87 | 70,179 | 0.003717 | 9.0% |
 | tiny | 88 | 1,551 | 0.000054 | 0.1% |
-| **none** | **169** | — | **0.000000** | **0.0%** |
+| **none** | **185** | — | **0.000000** | **0.0%** |
 
-**180 of 633 stages (28%) cost nothing** — retrieval and six of the eight
+**185 of 652 stages (28%) cost nothing** — retrieval and six of the eight
 guardrails are local compute. That is the concrete form of *"a smaller model or
 a classical method can replace constant LLM calls"*.
 
@@ -462,6 +462,22 @@ still shows a working dashboard, and writes made while auth is off are stamped
 `(unauthenticated)` in the audit trail — otherwise a year later nobody could
 tell a signed approval from one made on an open port.
 
+`GET /api/me` reports the caller's identity and capabilities, and it deliberately
+answers **anonymous** callers rather than 401-ing them. A whoami endpoint the
+dashboard uses to decide whether to show a login cannot reject the very case it
+exists to detect — that bug made the app render as if signed in.
+
+**There is a sign-in screen, and deliberately no sign-up.** Nobody self-registers
+for the system that writes to customer records and releases outbound messages; an
+administrator provisions them. Where a "create an account" link would sit, the
+screen states the provisioning model. Development builds show seeded accounts as
+quick-fill buttons; `import.meta.env.DEV` is replaced with a literal at build
+time, so that block is *compiled out* of a production bundle rather than hidden
+with CSS.
+
+Set `VITE_API_KEY` in `frontend/.env.local` to bypass the screen entirely — useful
+when demoing.
+
 ### Swapping in a real CRM
 
 The pipeline talks to a four-method port, not to SQLite:
@@ -501,12 +517,21 @@ claim is "this works against an HTTP CRM", not "we imagined one".
 
 ### The 90-second demo
 
-1. Pick **call-001 — hidden charges** on the idle screen.
-2. Read the consent line. Nothing runs until you do — that is a code gate.
-3. Watch the **Say Line**. Figures with a teal underline are traced to a clause;
+1. **Sign in** as *Priya Nair · agent*. Her key is the name that will go on
+   anything she approves — she cannot type a different one.
+2. Pick **call-001 — hidden charges** on the idle screen.
+3. Read the consent line. Nothing runs until you do — that is a code gate.
+4. Watch the **Say Line**. Figures with a teal underline are traced to a clause;
    hover one for the document, version, and chunk id.
-4. On the credit-terms turn, the band turns amber: *you* confirm before saying it.
-5. End the call. Read the before → after diff, sign it, send.
+5. Glance at **Their record** on the right. The small green dots mark exactly
+   which fields reach the co-pilot's prompt — the credit limit is shown to the
+   agent but deliberately withheld from the model, which must not predict one.
+6. On the credit-terms turn, the band turns amber: *you* confirm before saying it.
+7. End the call. Read the before → after diff, check it says *Signing as Priya
+   Nair*, and sign it.
+
+For the full eight-minute version with timings and voiceover, see
+[`docs/SahAI-Demo-Script.pdf`](docs/SahAI-Demo-Script.pdf).
 
 ### Show the machinery
 
@@ -558,6 +583,15 @@ character offsets that the Say Line underlines *and* the verdict the guardrail
 blocks on. One function, one source of truth — the marks and the decision can
 never disagree.
 
+**The agent can see what the co-pilot read.** The CRM used to be invisible during
+a call — four words in the on-air strip, then a diff once it was over, by which
+point the agent has already said everything they were going to say. The Say Line
+underlines every figure it took from the handbook, but the *other* half of the
+context shaping that sentence was unreadable, so "why did it suggest that?" had no
+answer. The fields dotted in **Their record** are exactly the ones in
+`nba._format_crm` — not an approximation — and where the record holds more history
+than the model gets, the panel says how many notes were withheld.
+
 **The microphone goes deaf while the co-pilot speaks.** On a laptop the
 suggestion comes out of the speakers next to the mic; without a gate the
 pipeline transcribes its own voice, files it as the customer, and answers
@@ -579,7 +613,7 @@ Aadhaar pattern. Redacting Aadhaar first produced `card [AADHAAR_REDACTED] 1111`
 ## Testing
 
 ```bash
-cd backend && pytest          # 178 tests, no network
+cd backend && pytest          # 187 tests, no network
 ```
 
 Written against the failures that actually happened, not for coverage:

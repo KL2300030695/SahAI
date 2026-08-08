@@ -82,7 +82,7 @@ Measured from the `usage` field of real API responses and priced by
 
 | | Per assisted call |
 |---|---|
-| **SahAI** | **$0.0038 (₹0.31)** |
+| **SahAI** | **$0.0037 (₹0.31)** |
 | Same tokens, one frontier-model mega-prompt | $0.204 (₹16.93) |
 | **Reduction** | **55×** |
 
@@ -110,7 +110,7 @@ Three levers, not one:
    trigger logged against every decision.
 2. **RAG instead of inference.** Retrieval is the highest-frequency step in the
    pipeline and costs **$0.00** — local embeddings plus BM25. Six of eight
-   guardrails likewise. Across the measured calls, **180 of 633 pipeline stages
+   guardrails likewise. Across the measured calls, **185 of 652 pipeline stages
    (28%) ran at zero marginal cost.**
 3. **Reasoning-effort control.** The reasoning models bill chain-of-thought as
    output tokens. Measured on an identical prompt: `low` = 150 completion
