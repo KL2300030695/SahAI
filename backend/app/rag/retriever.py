@@ -53,11 +53,18 @@ RRF_K = 60  # standard reciprocal-rank-fusion damping constant
 #:   sends, not the raw utterance. "is it safe" alone is indistinguishable from
 #:   noise; the same words classified as OBJECTION_TRUST are not.
 #:
-#: Measured on the expanded query: in-domain [0.4807, 0.7008] over 20 utterances,
-#: off-topic [0.1406, 0.4480] over 12. The midpoint (0.464) separates that sample
-#: perfectly but leaves 0.016 of margin either side, which is noise. 0.40 keeps
-#: 0.08 of headroom under the weakest real question and still rejects 11 of 12
-#: off-topic turns.
+#: Measured on the query the pipeline builds: in-domain [0.4323, 0.7186] over 20
+#: utterances, off-topic [0.1339, 0.4442] over 12. At 0.40, no real question is
+#: rejected and 11 of 12 off-topic turns are. The one that gets through -- "my
+#: order never arrived from the online store" -- is genuinely near-domain, being
+#: about a purchase, and is caught by intent classification as a complaint
+#: rather than by this floor.
+#:
+#: Headroom under the weakest real question is 0.032, narrower than it was
+#: before the utterance was weighted above the intent hint. Re-run the
+#: calibration after touching `build_query`: dropping the hint on longer
+#: questions looked like an improvement and pushed three genuine questions below
+#: this line, which only the measurement showed.
 #:
 #: The asymmetry is deliberate. A false "no match" costs one sentence -- the
 #: agent says they will check. A false match hands fee text to someone asking
@@ -240,10 +247,41 @@ _INTENT_HINTS: dict[Intent, str] = {
 }
 
 
+#: How many times the customer's own words are repeated before the intent hint
+#: is appended. See `build_query`.
+_UTTERANCE_WEIGHT = 2
+
+
 def build_query(
     utterance: str, intent: Intent, entities: dict[str, str] | None = None
 ) -> str:
-    parts = [utterance.strip()]
+    """The text retrieval actually searches on.
+
+    The intent hint exists to rescue an utterance too short to embed
+    meaningfully -- "any charges", "how much", "is it safe" are close to noise
+    on their own, and measurably separate from off-topic once expanded.
+
+    It is *not* applied to a well-formed question, because there it does harm.
+    Asked "What if I don't have any Aadhaar?", the KYC_STEPS hint appended "KYC
+    steps Aadhaar OTP PAN mandate documents" and pulled the query toward the
+    process documents -- the ones describing how to complete KYC. The document
+    that answers the question, which says Aadhaar is mandatory and the customer
+    cannot proceed without one, dropped out of the top four entirely. The
+    assistant then answered the nearest question it had a source for, which was
+    the privacy objection "I don't want to *share* my Aadhaar", and reassured a
+    customer about OTPs on an Aadhaar-linked number they had just said they do
+    not have.
+
+    A hint that overrides the customer's own words is worse than no hint.
+    """
+    utterance = utterance.strip()
+    # The utterance is repeated so it outweighs the hint rather than competing
+    # with it on equal terms. Dropping the hint on longer questions was tried
+    # first and made things worse: it is what rescues "any charges" and "is it
+    # safe", and removing it pushed three genuine questions below the
+    # confidence floor -- `scripts.calibrate_retrieval` caught that immediately.
+    parts = [utterance] * _UTTERANCE_WEIGHT
+
     hint = _INTENT_HINTS.get(intent, "")
     if hint:
         parts.append(hint)
