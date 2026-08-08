@@ -135,6 +135,9 @@ _MISHEARD: dict[str, str] = {
     "e kyc": "e-KYC",
     "ekyc": "e-KYC",
     "kyc": "KYC",
+    "kvc": "KYC",
+    "k y c": "KYC",
+    "kyc onboarding": "KYC onboarding",
     "enach": "e-NACH",
     "e nach": "e-NACH",
     "otp": "OTP",
@@ -247,7 +250,31 @@ def is_prompt_echo(text: str) -> bool:
         return True
 
     matched = sum(1 for g in grams if g in prompt_grams)
-    return matched / len(grams) >= 0.20
+    if matched / len(grams) >= 0.20:
+        return True
+
+    # A short echo that *repeats* a prompt phrase defeats trigrams entirely.
+    # Observed live: "Spoken numbers. Spoken numbers." Its trigrams are "spoken
+    # numbers spoken" and "numbers spoken numbers", and neither exists in the
+    # prompt -- the repetition manufactures sequences the source never had.
+    #
+    # Caught instead on vocabulary: a short utterance whose every word comes
+    # from the prompt, and which contains one of the prompt's own two-word
+    # phrases, is the prompt coming back. Both conditions are needed. Either
+    # alone would reach real speech, since a caller can easily say a handful of
+    # words that all appear somewhere in a paragraph about their own product.
+    if len(words) <= 8:
+        prompt_words = set(_norm(STT_PROMPT).split())
+        if all(w in prompt_words for w in words):
+            bigrams = {" ".join(words[i : i + 2]) for i in range(len(words) - 1)}
+            prompt_bigrams = {
+                " ".join(_norm(STT_PROMPT).split()[i : i + 2])
+                for i in range(len(_norm(STT_PROMPT).split()) - 1)
+            }
+            if bigrams & prompt_bigrams:
+                return True
+
+    return False
 
 
 def is_probably_hallucination(text: str, audio_seconds: float = 0.0) -> bool:

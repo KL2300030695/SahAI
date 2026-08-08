@@ -135,6 +135,8 @@ export function useMic({
   const onBargeInRef = useRef(onBargeIn);
   onBargeInRef.current = onBargeIn;
   const bargeStartRef = useRef(0);
+  /** Set when the customer talked over the reading, so the segment is kept. */
+  const bargedRef = useRef(false);
 
   /** Finalise the current recording; `emit` decides whether anyone hears it. */
   const cutSegment = useCallback((emit: boolean) => {
@@ -198,10 +200,24 @@ export function useMic({
     if (shutNow !== gatedRef.current) {
       gatedRef.current = shutNow;
       if (shutNow) {
+        // Recording CONTINUES through the reading. It used to be discarded
+        // here, which meant an interruption lost its opening words: by the time
+        // barge-in fired, a fifth of a second of the customer had already gone
+        // unrecorded, and that is usually the part that says what they want.
+        //
+        // The segment is kept only if they actually interrupt. If the reading
+        // finishes undisturbed, whatever the microphone picked up is echo of
+        // the co-pilot's own voice and is thrown away below — so the original
+        // failure, the pipeline transcribing itself, cannot come back on a turn
+        // where nobody spoke.
         speakingRef.current = false;
-        cutSegment(false); // discard whatever is in flight
-      } else if (streamRef.current && !recorderRef.current) {
-        startRecorder(streamRef.current);
+        bargedRef.current = false;
+      } else if (!bargedRef.current) {
+        // Read finished with nobody talking over it: bin the echo, start clean.
+        cutSegment(false);
+        if (streamRef.current && !recorderRef.current) {
+          startRecorder(streamRef.current);
+        }
       }
       setState((s) => ({ ...s, muted: shutNow, speaking: false, level: 0 }));
     }
@@ -215,6 +231,12 @@ export function useMic({
           bargeStartRef.current = now;
         } else if (now - bargeStartRef.current > bargeInMs) {
           bargeStartRef.current = 0;
+          // Marked before the callback: the gate can reopen on the very next
+          // tick, and the reopen path checks this to decide whether the audio
+          // in flight is the customer or the co-pilot's own echo.
+          bargedRef.current = true;
+          speakingRef.current = true; // their speech is already in the segment
+          lastVoiceRef.current = now;
           onBargeInRef.current?.(); // stops the voice; the gate opens next tick
         }
       } else {
@@ -288,6 +310,7 @@ export function useMic({
       lastVoiceRef.current = performance.now();
       speakingRef.current = false;
       gatedRef.current = false;
+      bargedRef.current = false;
       startRecorder(stream);
 
       setState((s) => ({ ...s, recording: true, error: null }));
@@ -316,6 +339,7 @@ export function useMic({
     analyserRef.current = null;
     speakingRef.current = false;
     gatedRef.current = false;
+    bargedRef.current = false;
     setState((s) => ({
       ...s,
       recording: false,

@@ -835,3 +835,36 @@ def test_ordinary_english_is_left_alone():
 
 def test_it_matches_whole_words_only():
     assert correct_domain_terms("Adharkandan is a surname") == "Adharkandan is a surname"
+
+
+def test_a_repeated_prompt_phrase_is_caught_as_an_echo():
+    """"Spoken numbers. Spoken numbers." appeared as a customer turn.
+
+    Trigrams cannot catch it: the repetition manufactures "spoken numbers
+    spoken" and "numbers spoken numbers", neither of which exists in the prompt
+    it came from.
+    """
+    from app.llm.client import is_prompt_echo
+
+    assert is_prompt_echo("Spoken numbers. Spoken numbers.")
+    assert is_prompt_echo("Domain terms. Domain terms.")
+
+
+def test_the_echo_rule_does_not_reach_real_speech():
+    """A caller can easily say a few words that all appear in a paragraph about
+    their own product. Both conditions — every word from the prompt, and a
+    prompt bigram present — are needed, and this is why."""
+    from app.llm.client import is_prompt_echo
+
+    for said in (
+        "I am an Indian resident",
+        "what about the EMI",
+        "the KYC process please",
+        "Aadhaar and PAN both",
+    ):
+        assert not is_prompt_echo(said), said
+
+
+def test_kvc_is_repaired_to_kyc():
+    """Seen in the same session as Adharkand."""
+    assert "KYC" in correct_domain_terms("Give me the process of KVC onboarding.")
