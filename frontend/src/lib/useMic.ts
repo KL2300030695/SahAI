@@ -63,9 +63,31 @@ interface Options {
   bargeInMs?: number;
   /** RMS below this counts as silence. */
   silenceThreshold?: number;
-  /** Silence needed to close an utterance. */
+  /**
+   * Silence needed to close an utterance.
+   *
+   * This is the single most consequential number in the file, and 900ms was
+   * too low. People pause mid-sentence — to think, to breathe, to find a word —
+   * and a pause longer than this splits one question into several turns.
+   * Observed live: "Hello? What if I don't have any..." / "Government ID
+   * proof." / "Indian." was one sentence, cut three ways. Whisper then
+   * transcribed clipped audio, the intent classifier saw fragments, and the
+   * suggestion answered a question nobody had asked — while billing three full
+   * pipeline runs for it.
+   *
+   * The cost of raising it is that the co-pilot answers a few hundred
+   * milliseconds later. That is barely perceptible, because the agent is still
+   * listening to the customer during it. The cost of leaving it low is a
+   * confidently wrong suggestion, which is far worse.
+   */
   silenceMs?: number;
-  /** Ignore blips shorter than this — coughs, clicks, door slams. */
+  /**
+   * Ignore blips shorter than this — coughs, clicks, door slams.
+   *
+   * Also the second line of defence against fragments: a genuine conversational
+   * turn is rarely under half a second, and a clipped one carries no question
+   * for the pipeline to answer.
+   */
   minUtteranceMs?: number;
   /** Force-close a monologue so the agent still gets help mid-flow. */
   maxUtteranceMs?: number;
@@ -78,8 +100,8 @@ export function useMic({
   bargeInFactor = 3,
   bargeInMs = 220,
   silenceThreshold = 0.012,
-  silenceMs = 900,
-  minUtteranceMs = 400,
+  silenceMs = 1300,
+  minUtteranceMs = 600,
   maxUtteranceMs = 20000,
 }: Options) {
   const [state, setState] = useState<MicState>({
