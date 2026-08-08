@@ -118,7 +118,10 @@ def test_a_rewrite_clears_the_block_and_is_attributed(client):
         },
     )
     assert r.status_code == 200, r.text
-    assert r.json()["send_status"] == "sent"
+    # `approved` not `sent`: a human said yes, but no email provider is
+    # configured in the test environment so nothing left the building.
+    assert r.json()["send_status"] == "approved"
+    assert r.json()["delivery"]["attempted"] is False
     assert "goal_alignment" in r.json()["overrode"]
 
     # The override is recorded in the audit trace under the *credential's*
@@ -150,7 +153,7 @@ def test_a_rewrite_still_cannot_claim_a_completed_action(client):
     assert _status() == "pending_agent_approval"
 
 
-def test_a_clean_call_still_sends_normally(client):
+def test_a_clean_call_still_passes_the_gate(client):
     """The gate must not become a wall — a passing call goes through untouched."""
     _seed([{"name": "grounding", "passed": True, "enforced_by": "code"}])
     r = client.post(
@@ -158,8 +161,28 @@ def test_a_clean_call_still_sends_normally(client):
         json={},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["send_status"] == "sent"
+    assert r.json()["send_status"] == "approved"
     assert r.json()["overrode"] == []
+
+
+def test_approved_is_not_sent_when_no_provider_is_configured(client):
+    """The distinction this exists to make.
+
+    `sent` used to mean "a human approved a draft that had a body" — nothing
+    left the building. On a dashboard, in a CSV and in a Firestore document,
+    that word implies delivery. It now means a provider accepted the message,
+    and `approved` covers the honest middle state.
+    """
+    _seed([])
+    r = client.post(f"/api/calls/{CALL_ID}/approve", json={})
+    body = r.json()
+    assert body["send_status"] == "approved"
+    assert body["delivery"] == {
+        "attempted": False,
+        "detail": "Brevo not configured.",
+    }
+    with session_scope() as s:
+        assert s.get(Call, CALL_ID).send_status == "approved"
 
 
 def test_rejecting_writes_nothing(client):

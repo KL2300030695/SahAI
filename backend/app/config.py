@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     chroma_dir: str = "./app/rag/store"
     cors_origins: str = "http://localhost:5173"
 
+    # --- Brevo: actually delivering an approved follow-up -----------------
+    # Transactional API (api.brevo.com/v3/smtp/email), not the marketing
+    # automations product: these are one-off messages triggered by a human
+    # approving one specific call.
+    brevo_api_key: str = ""
+    brevo_sender_email: str = ""
+    brevo_sender_name: str = "PayFlex"
+    #: Safety valve. When set, EVERY message goes here instead of the
+    #: customer's address, with the intended recipient prefixed to the subject.
+    #: Seeded customers carry invented addresses; without this a demo either
+    #: bounces into a stranger's inbox or wrecks the sender reputation of a
+    #: brand-new Brevo account on its first run.
+    brevo_redirect_to: str = ""
+
     # --- CRM connector ----------------------------------------------------
     # "sqlite" (shipped default) or "rest" for any HTTP CRM. The REST adapter
     # is configured, not coded: point it at a base URL and map field names.

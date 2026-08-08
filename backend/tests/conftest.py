@@ -18,10 +18,37 @@ one enables it deliberately with `monkeypatch`.
 
 from __future__ import annotations
 
-import pytest
+import os
+import tempfile
+from pathlib import Path
 
-from app.integrations import firestore_sync, sheets
-from app import security
+# Point the suite at its own database before ANY app module is imported --
+# app.crm.db builds its engine at import time, so setting this later has no
+# effect. Without it the suite shares backend/data/sahai.db with a running
+# uvicorn, and the two writers collide: the same run passes 197 tests and then
+# fails one at random, which is worse than failing consistently because it
+# trains everyone to re-run until green.
+_TEST_DB = Path(tempfile.gettempdir()) / "sahai-tests.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB.as_posix()}"
+
+import pytest  # noqa: E402
+
+from app.integrations import brevo, firestore_sync, sheets  # noqa: E402
+from app import security  # noqa: E402
+from app.crm.db import init_db  # noqa: E402
+from app.seed.seed_db import seed as seed_db  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_database():
+    """Build the test database once per session."""
+    init_db()
+    try:
+        seed_db()
+    except Exception:
+        # Seeding is a convenience; tests that need a customer create their own.
+        pass
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +61,10 @@ def _no_external_writes(monkeypatch):
     """
     monkeypatch.setattr(firestore_sync, "enabled", lambda: False, raising=True)
     monkeypatch.setattr(sheets, "enabled", lambda: False, raising=True)
+    # Brevo actually delivers email. It was added after this fixture was written
+    # and was not covered by it -- so a machine with BREVO_API_KEY set would have
+    # sent real messages to seeded customers on every test run.
+    monkeypatch.setattr(brevo, "enabled", lambda: False, raising=True)
     yield
 
 

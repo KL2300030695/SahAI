@@ -41,6 +41,10 @@ class Customer(Base):
     customer_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), default="")
     phone_masked: Mapped[str] = mapped_column(String(32), default="")
+    #: Where an approved follow-up is actually delivered. Unmasked, unlike the
+    #: phone: a masked address cannot be sent to, and storing a fake one would
+    #: mean "sent" silently meaning nothing.
+    email: Mapped[str] = mapped_column(String(200), default="")
     city: Mapped[str] = mapped_column(String(64), default="")
     kyc_status: Mapped[str] = mapped_column(String(32), default="not_started")
     kyc_last_step: Mapped[int] = mapped_column(Integer, default=0)

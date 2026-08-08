@@ -125,7 +125,7 @@ def test_finalise_and_approve_work_untouched_with_no_google_setup(unconfigured):
         json={"approver_id": "tester"},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["send_status"] == "sent"
+    assert r.json()["send_status"] == "approved"
     assert r.json()["mirrored"] == {"firestore": False, "sheets": None}
 
 
@@ -173,7 +173,7 @@ def test_approval_still_succeeds_when_every_mirror_is_down(monkeypatch):
     )
     assert r.status_code == 200, r.text
     with session_scope() as s:
-        assert s.get(Call, CALL_ID).send_status == "sent"
+        assert s.get(Call, CALL_ID).send_status == "approved"
 
 
 # --- both destinations describe the call identically -----------------------

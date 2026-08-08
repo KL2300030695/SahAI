@@ -14,10 +14,15 @@ from app.crm.models import Customer, Interaction
 
 TRANSCRIPT_DIR = Path(__file__).resolve().parent / "transcripts"
 
+# Addresses use the RFC 2606 reserved .invalid TLD on purpose: it can never
+# resolve, so a misconfigured demo cannot deliver to a real person even if
+# BREVO_REDIRECT_TO is forgotten. Set a real address here only for a customer
+# you actually intend to email.
 CUSTOMERS = [
     dict(
         customer_id="CUST-1042",
         name="Arun Menon",
+        email="arun.menon@example.invalid",
         phone_masked="+91 98450 XXXXX",
         city="Bengaluru",
         kyc_status="not_started",
@@ -33,6 +38,7 @@ CUSTOMERS = [
     dict(
         customer_id="CUST-2318",
         name="Sneha Kulkarni",
+        email="sneha.kulkarni@example.invalid",
         phone_masked="+91 99870 XXXXX",
         city="Pune",
         kyc_status="in_progress",
@@ -48,6 +54,7 @@ CUSTOMERS = [
     dict(
         customer_id="CUST-3771",
         name="Deepak Iyer",
+        email="deepak.iyer@example.invalid",
         phone_masked="+91 90080 XXXXX",
         city="Chennai",
         kyc_status="not_started",
@@ -63,6 +70,7 @@ CUSTOMERS = [
     dict(
         customer_id="CUST-4506",
         name="Farhan Qureshi",
+        email="farhan.qureshi@example.invalid",
         phone_masked="+91 97400 XXXXX",
         city="Hyderabad",
         kyc_status="not_started",

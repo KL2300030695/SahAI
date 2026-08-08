@@ -478,6 +478,48 @@ with CSS.
 Set `VITE_API_KEY` in `frontend/.env.local` to bypass the screen entirely — useful
 when demoing.
 
+### Sending the follow-up for real (Brevo)
+
+Until this was wired, `send_status = "sent"` meant *"a human approved a draft
+that had a body"* — nothing left the building. On a dashboard, in a CSV and in a
+Firestore document, that word implies delivery. It now means a provider accepted
+the message, and **`approved`** covers the honest middle state: a human said yes,
+but nothing has gone out.
+
+Use Brevo's **Transactional** API, not the Automations product — an automation is
+a drip campaign triggered by a list; this is one message about one call released
+by one named human.
+
+1. Brevo → **SMTP & API → API keys** → create a v3 key.
+2. Brevo → **Senders, Domains & IPs** → verify the address you will send from.
+
+```ini
+BREVO_API_KEY=xkeysib-…
+BREVO_SENDER_EMAIL=you@yourdomain.com     # must be verified in Brevo
+BREVO_SENDER_NAME=PayFlex
+BREVO_REDIRECT_TO=you@gmail.com           # ← leave this set for demos
+```
+
+**`BREVO_REDIRECT_TO` is a safety valve, not a debug flag.** The seeded customers
+carry `@example.invalid` addresses — an RFC 2606 reserved TLD that can never
+resolve, so a misconfigured run cannot reach a real person. With the redirect set,
+every message goes to your inbox instead, with the intended recipient prefixed to
+the subject (`[to: arun.menon@example.invalid] …`) so a demo of four follow-ups is
+four distinguishable emails rather than four identical ones.
+
+Delivery happens **inside the approval gate and after it** — a blocked draft is
+refused, a rewrite is re-checked, the approver is resolved from their credential,
+and only then is anything sent. There is no path from an agent to the sender. If
+Brevo rejects the message the call stays `approved` and the error is reported at
+`/api/integrations/status`; writing `sent` because we tried would make the state
+machine lie in the only direction that matters.
+
+Each message carries `X-SahAI-Call-Id` and `X-SahAI-Approved-By` headers, so a row
+in Brevo's log traces back to the call and the person who released it without
+opening this codebase.
+
+---
+
 ### Swapping in a real CRM
 
 The pipeline talks to a four-method port, not to SQLite:

@@ -26,6 +26,27 @@ engine = create_engine(_url, connect_args={"check_same_thread": False}, future=T
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+def _ensure_schema_once() -> None:
+    """Bring the schema up to date the first time this module is imported.
+
+    Previously this only ran from the FastAPI startup event, so anything that
+    touched the database without booting the web app -- the test suite, the
+    seed script, a one-off query in a shell -- ran against whatever shape the
+    file happened to have. Adding a column then produced `no such column` from
+    six unrelated tests, which reads like a broken test suite rather than a
+    pending migration.
+
+    A module that owns a database should be usable without a web framework
+    having started first. Both operations are idempotent and cost microseconds.
+    """
+    try:
+        Base.metadata.create_all(engine)
+        _add_missing_columns()
+    except Exception:
+        # Never make importing the module fatal; init_db() will surface it.
+        pass
+
+
 def init_db() -> None:
     (BACKEND_DIR / "data").mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
@@ -43,7 +64,10 @@ def _add_missing_columns() -> None:
     """
     from sqlalchemy import inspect, text
 
-    wanted = {"cost_rows": {"note": "TEXT DEFAULT ''"}}
+    wanted = {
+        "cost_rows": {"note": "TEXT DEFAULT ''"},
+        "customers": {"email": "VARCHAR(200) DEFAULT ''"},
+    }
     insp = inspect(engine)
     with engine.begin() as conn:
         for table, columns in wanted.items():
@@ -180,3 +204,6 @@ def apply_approved_patch(
     call.approved_by = approver_id
     call.approved_at = datetime.now(timezone.utc)
     return True, "applied"
+
+
+_ensure_schema_once()

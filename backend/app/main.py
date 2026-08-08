@@ -72,7 +72,7 @@ from app.export import (
     trace_rows,
 )
 from app.guardrails import rules
-from app.integrations import firestore_sync, sheets
+from app.integrations import brevo, firestore_sync, sheets
 from app.security import (
     Principal,
     auth_enabled,
@@ -949,9 +949,44 @@ def approve(
             trace.extend(json.loads(c.model_dump_json()) for c in overrides)
             call.guardrail_trace_json = json.dumps(trace)
 
+        # --- delivery -----------------------------------------------------
+        # Reached only after the gate above: a blocked draft was refused, a
+        # rewrite was re-checked, and the approver came from their credential.
         followup = json.loads(call.followup_json or "{}")
+        delivery: dict[str, Any] = {"attempted": False}
         if followup.get("body"):
-            call.send_status = "sent"
+            # A human has said yes. That is true regardless of what the email
+            # provider does next, so record it before attempting delivery.
+            call.send_status = "approved"
+
+            if brevo.enabled():
+                customer = s.get(Customer, call.customer_id)
+                res = brevo.send_email(
+                    to_email=getattr(customer, "email", "") or "",
+                    to_name=getattr(customer, "name", "") or "",
+                    subject=followup.get("subject") or "",
+                    body=followup["body"],
+                    approved_by=principal.audit_name,
+                    call_id=call_id,
+                )
+                delivery = {
+                    "attempted": True,
+                    "ok": res.ok,
+                    "recipient": res.recipient,
+                    "redirected": res.redirected,
+                    "message_id": res.message_id,
+                    "detail": res.detail,
+                }
+                # `sent` now means a provider accepted it. On failure the call
+                # stays `approved` -- writing `sent` because we tried would make
+                # the state machine lie in the only direction that matters, and
+                # the follow-up would be silently lost.
+                if res.ok:
+                    call.send_status = "sent"
+            else:
+                # No provider configured. The draft is approved and queued;
+                # calling that "sent" is what this whole change exists to stop.
+                delivery = {"attempted": False, "detail": "Brevo not configured."}
 
         result = {
             "call_id": call_id,
@@ -959,6 +994,7 @@ def approve(
             "approved_by": call.approved_by,
             "crm_patch_applied": json.loads(call.crm_patch_json or "{}"),
             "overrode": [c.name.value for c in overrides],
+            "delivery": delivery,
             "message": message,
         }
         customer = s.get(Customer, call.customer_id)
@@ -1217,6 +1253,7 @@ def integrations_status() -> dict:
     """
     return {
         "crm": get_crm_backend().describe(),
+        "brevo": brevo.status(),
         "firestore": firestore_sync.status(),
         "sheets": sheets.status(),
     }
