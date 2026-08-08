@@ -227,7 +227,7 @@ cd frontend && npm run dev                       →  http://localhost:5173</pre
 <tr>
   <td class="t">6:25</td>
   <td class="do">Point at the <span class="mono">none</span> tier rows showing <span class="mono">0.000000</span>.</td>
-  <td class="say">And the reason is on the same screen. A hundred and eighty-five of six hundred and fifty-two pipeline stages cost nothing at all. Retrieval is local embeddings plus BM25. Six of the eight guardrails are plain Python. Most of this system is not a language model.</td>
+  <td class="say">And the reason is on the same screen. A hundred and eighty-five of six hundred and fifty-two pipeline stages cost nothing at all. Retrieval is local embeddings plus BM25. Seven of the nine guardrails are plain Python. Most of this system is not a language model.</td>
 </tr>
 
 <tr class="beat"><td class="t">6:45</td><td class="do" colspan="2">⑧ ARCHITECTURE &amp; INTEGRATION — 50s</td></tr>
@@ -288,7 +288,7 @@ cd frontend && npm run dev                       →  http://localhost:5173</pre
   <tr><td>"about a third of a US cent" / "$0.0037" / "₹0.31"</td><td>"half a cent", "₹0.27" (old figure)</td></tr>
   <tr><td>"fifty-five times cheaper"</td><td>"57×" (that is call-001 alone, not the mean)</td></tr>
   <tr><td>"185 of 652 stages cost nothing" or "28%"</td><td>"most of it is free"</td></tr>
-  <tr><td>"six of the eight guardrails are code"</td><td>"all the guardrails are deterministic"</td></tr>
+  <tr><td>"seven of the nine guardrails are code"</td><td>"all the guardrails are deterministic"</td></tr>
   <tr><td>"187 tests, all offline"</td><td>"full test coverage"</td></tr>
 </table>
 
@@ -302,7 +302,7 @@ cd frontend && npm run dev                       →  http://localhost:5173</pre
 <h3>One-line answers, if asked live</h3>
 <table>
   <tr><td style="width:38%"><em>"Is this just an LLM wrapper?"</em></td>
-      <td>185 of 652 stages cost nothing — retrieval is local, six of eight guardrails are Python, and the big model runs on about one turn in three.</td></tr>
+      <td>185 of 652 stages cost nothing — retrieval is local, seven of nine guardrails are Python, and the big model runs on about one turn in three.</td></tr>
   <tr><td><em>"How do you stop it inventing a fee?"</em></td>
       <td>Three layers: retrieval withholds source text below a measured similarity floor, the prompt only ever sees retrieved chunks, and then code verifies every figure verbatim against its cited chunk and blocks if one is unaccounted for.</td></tr>
   <tr><td><em>"What if the agent approves everything?"</em></td>

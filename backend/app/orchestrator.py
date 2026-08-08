@@ -242,6 +242,11 @@ class Orchestrator:
                 consent_ack=consent_ack,
                 injection_flagged=False,
                 stage="live_turn",
+                # What the customer actually said, so an attribution can be
+                # checked against it rather than taken on trust.
+                source_text=" ".join(
+                    t.text for t in window if t.speaker == Speaker.CUSTOMER
+                ),
             ),
             meter=meter,
             turn_index=turn.index,

@@ -496,3 +496,84 @@ def check_figures_in_source(text: str, source_text: str) -> CheckResult:
         ),
         enforced_by="code",
     )
+
+
+#: Phrases that assert the customer said, asked or wants something. Second
+#: person and past/present tense only -- "I'll walk you through the documents"
+#: is the agent describing their own next action and must not match.
+_ATTRIBUTION = re.compile(
+    r"\b(?:"
+    r"you\s+(?:mentioned|asked(?:\s+about)?|said|told\s+me|raised|brought\s+up|"
+    r"wanted\s+to\s+know(?:\s+about)?|were\s+asking(?:\s+about)?)"
+    r"|you(?:'re|\s+are)\s+(?:curious|asking|wondering|worried|concerned)"
+    r"(?:\s+about)?"
+    r"|as\s+you\s+(?:mentioned|said|noted)"
+    r"|your\s+(?:question|concern|query)\s+about"
+    r")\s+(?P<topic>[^.,;!?]{3,70})",
+    re.IGNORECASE,
+)
+
+#: Words carried by an attribution that say nothing about its subject.
+_EMPTY = {
+    "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "with", "at",
+    "is", "are", "was", "were", "be", "been", "it", "this", "that", "these",
+    "those", "your", "our", "my", "we", "you", "i", "how", "what", "when",
+    "why", "if", "so", "but", "just", "about", "some", "any", "more", "much",
+    "can", "will", "would", "should", "do", "does", "did", "have", "has",
+}
+
+
+def check_no_invented_context(say: str, transcript: str) -> CheckResult:
+    """The suggestion must not tell the customer what they asked.
+
+    A garbled transcript -- "Hello, I have you a thousand dollars, you can't
+    even get me" -- plus a CRM record showing KYC not started produced "I
+    understand you're curious about the KYC steps". Nothing in that turn
+    mentioned KYC. The model filled a gap from the record and attributed the
+    result to the customer.
+
+    That is worse than an ordinary hallucination. Stating a wrong fee is
+    checkable and the agent may catch it; telling someone what they just said is
+    both unfalsifiable in the moment and unsettling to hear. It is also the
+    conversational twin of the grounding rule: figures must trace to the
+    handbook, and claims about the conversation must trace to the conversation.
+
+    Only explicit attributions are matched. "I'll walk you through the
+    documents" is the agent describing their own next action and is untouched --
+    a check that fired on ordinary helpfulness would be turned off within a day.
+    """
+    text = say or ""
+    haystack = {w for w in re.findall(r"[a-z0-9]+", (transcript or "").lower())}
+
+    invented: list[str] = []
+    for m in _ATTRIBUTION.finditer(text):
+        topic = m.group("topic")
+        words = [
+            w for w in re.findall(r"[a-z0-9]+", topic.lower())
+            if w not in _EMPTY and len(w) > 2
+        ]
+        if not words:
+            continue  # "as you mentioned," with no subject -- nothing to verify
+        # One overlapping content word is enough. The suggestion paraphrases;
+        # demanding an exact match would fail on every reasonable rewording.
+        if not any(w in haystack for w in words):
+            invented.append(topic.strip())
+
+    if invented:
+        return CheckResult(
+            name=CheckName.NO_INVENTED_CONTEXT,
+            passed=False,
+            detail=(
+                "Tells the customer what they said, and the transcript does not "
+                f"support it: {'; '.join(repr(i) for i in invented)}. Ask them "
+                "instead of assuming."
+            ),
+            enforced_by="code",
+            severity=Severity.BLOCK,
+        )
+    return CheckResult(
+        name=CheckName.NO_INVENTED_CONTEXT,
+        passed=True,
+        detail="No claims about the conversation that it does not support.",
+        enforced_by="code",
+    )

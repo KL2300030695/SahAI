@@ -98,7 +98,7 @@
 
 <div class="kpi">
   <div><span class="v">6</span><span class="l">agents</span></div>
-  <div><span class="v">8</span><span class="l">guardrails (6 in code)</span></div>
+  <div><span class="v">9</span><span class="l">guardrails (7 in code)</span></div>
   <div><span class="v">28%</span><span class="l">stages at zero cost</span></div>
   <div><span class="v">187</span><span class="l">tests passing</span></div>
 </div>
@@ -111,7 +111,7 @@
   <li>What the product actually is</li>
   <li>The pipeline, stage by stage</li>
   <li>Cost: how 55× is achieved</li>
-  <li>The eight guardrails</li>
+  <li>The nine guardrails</li>
   <li>Where automation stops</li>
   <li>Enterprise architecture</li>
   <li>The dashboard, screen by screen</li>
@@ -131,7 +131,7 @@
   SahAI listens to a live sales call and puts <strong>one sentence</strong> on the agent's screen —
   the next thing to say — with every figure in it underlined and traced back to the exact clause of
   the product handbook it came from. It understands intent, retrieves the right terms, checks its own
-  output against eight guardrails, and after the call writes a summary, proposes a CRM update and
+  output against nine guardrails, and after the call writes a summary, proposes a CRM update and
   drafts a follow-up. It never speaks to the customer, and it cannot write to a customer record on
   its own. Both of those are enforced by code and a state machine, not requested in a prompt.
 </p>
@@ -283,7 +283,7 @@
 </table>
 <div class="box good">
   <span class="t">185 of 652 pipeline stages (28%) cost nothing at all</span>
-  <p>Retrieval and six of the eight guardrails are local compute. That is the concrete form of the
+  <p>Retrieval and seven of the nine guardrails are local compute. That is the concrete form of the
      brief's principle that "a smaller open-source model, RAG, or a classical solver could replace
      constant calls to an expensive commercial LLM".</p>
 </div>
@@ -304,7 +304,7 @@
   chunks, so the true gap is wider than the number claims.
 </p>
 
-<h2 class="page-break">6 · The eight guardrails</h2>
+<h2 class="page-break">6 · The nine guardrails</h2>
 <p>
   <code>enforced_by</code> is shipped to the UI so a reviewer can see which checks are un-promptable
   code and which are model judgement. We do not blur the distinction.
@@ -317,6 +317,7 @@
   <tr><td class="mono">no_stale_terms</td><td><span class="tag ok">code</span></td><td>Clauses past their <code>effective_to</code> date</td></tr>
   <tr><td class="mono">no_autonomous_credit_terms</td><td><span class="tag ok">code</span></td><td>Forces human confirmation on credit language</td></tr>
   <tr><td class="mono">no_fabricated_actions</td><td><span class="tag ok">code</span></td><td>"I've already sent you an email" — the worst available failure</td></tr>
+  <tr><td class="mono">no_invented_context</td><td><span class="tag ok">code</span></td><td>Telling the customer what <em>they</em> said, unsupported by the transcript</td></tr>
   <tr><td class="mono">injection_screen</td><td><span class="tag mid">llm</span></td><td>Prompt-injection attempts</td></tr>
   <tr><td class="mono">goal_alignment</td><td><span class="tag mid">llm</span></td><td>Drift from the business conduct policy</td></tr>
 </table>
@@ -615,6 +616,7 @@ curl -X POST localhost:8000/api/integrations/sync -H "X-API-Key: k_admin_ravi"</
   <tr><td>Retrieval had no confidence floor</td><td>RRF scores rank, not relevance — off-topic queries returned four confident-looking citations.</td></tr>
   <tr><td>Post-call grounding used the wrong source</td><td>Every summary containing any number failed. A guardrail that cries wolf teaches agents to ignore the panel where real blocks appear.</td></tr>
   <tr><td>PII redaction ordering</td><td>A 16-digit card's first 12 digits matched the Aadhaar pattern → <code>card [AADHAAR_REDACTED] 1111</code>, leaking four digits.</td></tr>
+  <tr><td>The co-pilot invented what the customer had asked</td><td>A garbled transcript plus a CRM record produced "I understand you're curious about the KYC steps" when nothing in the turn mentioned KYC. Telling someone what they just said is unfalsifiable in the moment — worse than a wrong figure, which is checkable.</td></tr>
   <tr><td>The co-pilot's TTS fed back into the microphone</td><td>The pipeline transcribed its own voice as the customer and answered itself.</td></tr>
   <tr><td>The test suite wrote to the live Firestore project</td><td>187 tests passed while creating documents named <code>test-approval-gate</code> beside real calls.</td></tr>
   <tr><td>Sheets bulk sync hit Google's read quota</td><td>Stopped at 19 of 38 and left a half-filled tab that looks exactly like missing data.</td></tr>
@@ -650,7 +652,7 @@ curl -X POST localhost:8000/api/integrations/sync -H "X-API-Key: k_admin_ravi"</
 
 <h4>"Is this just a wrapper around an LLM?"</h4>
 <p>No — and the ledger proves it. 185 of 652 pipeline stages cost nothing: retrieval is local ONNX
-   embeddings plus BM25, and six of eight guardrails are plain Python over the generated text. The
+   embeddings plus BM25, and seven of nine guardrails are plain Python over the generated text. The
    expensive model is invoked on roughly one turn in three, and only when a named code rule says the
    turn earns it.</p>
 

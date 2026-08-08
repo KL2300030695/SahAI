@@ -8,7 +8,7 @@ to say — with every figure in it traced back to the clause it came from.
 It never speaks to the customer, and it cannot write to a customer record on its
 own. Both of those are enforced in code, not asked for in a prompt.
 
-**Six agents · five open-weights models · eight guardrails · $0.0037 per call.**
+**Six agents · five open-weights models · nine guardrails · $0.0037 per call.**
 
 ---
 
@@ -173,7 +173,7 @@ that works. BM25 stays a *ranking* contributor (it is what catches "₹250" and
 *"how do I reset my wifi router"* outscores most genuine product questions on
 BM25 alone — it rewards the common tokens in "how do I".
 
-### The eight guardrails
+### The nine guardrails
 
 `enforced_by` is shipped to the UI so a reviewer can see which are
 un-promptable code and which are model judgement.
@@ -186,6 +186,7 @@ un-promptable code and which are model judgement.
 | `no_stale_terms` | **code** | Clauses past their `effective_to` date |
 | `no_autonomous_credit_terms` | **code** | Forces human confirmation on credit language |
 | `no_fabricated_actions` | **code** | *"I've already sent you an email"* — the worst available failure |
+| `no_invented_context` | **code** | Telling the customer what *they* said, when the transcript does not support it |
 | `injection_screen` | llm | Prompt-injection attempts |
 | `goal_alignment` | llm | Drift from the business conduct policy |
 
@@ -256,7 +257,7 @@ Where the money goes, across all 22:
 | tiny | 88 | 1,551 | 0.000054 | 0.1% |
 | **none** | **185** | — | **0.000000** | **0.0%** |
 
-**185 of 652 stages (28%) cost nothing** — retrieval and six of the eight
+**185 of 652 stages (28%) cost nothing** — retrieval and seven of the nine
 guardrails are local compute. That is the concrete form of *"a smaller model or
 a classical method can replace constant LLM calls"*.
 
@@ -616,7 +617,7 @@ Every path runs, nothing is billed, and the cost ledger reads zero.
 their own words. That is what makes the guardrails meaningful — there is always
 a person between the model and the customer.
 
-**Guardrails are code where they can be.** Six of eight checks are plain Python
+**Guardrails are code where they can be.** Seven of nine checks are plain Python
 over the generated text. They cannot be prompt-injected away because they are
 not prompts. The two that need judgement are labelled `llm` in the UI, honestly.
 

@@ -718,3 +718,70 @@ def test_the_old_kb_check_would_have_failed_all_of_these():
     ordinary = "Arun asked about hidden charges. Confirmed the Rs 199 late fee."
     assert not rules.check_grounding(ordinary, [], []).passed
     assert rules.check_figures_in_source(ordinary, _TRANSCRIPT).passed
+
+
+# ---------------------------------------------------------------------------
+# Claims about the conversation must trace to the conversation
+#
+# A garbled transcript — "Hello, I have you a thousand dollars, you can't even
+# get me" — plus a CRM record showing KYC not started produced "I understand
+# you're curious about the KYC steps". Nothing in that turn mentioned KYC. The
+# model filled a gap from the record and attributed the result to the customer.
+#
+# Worse than an ordinary hallucination: a wrong fee is checkable and the agent
+# may catch it, but telling someone what they just said is unfalsifiable in the
+# moment and unsettling to hear.
+# ---------------------------------------------------------------------------
+
+_GARBLED = "Hello, I have you a thousand dollars, you can't even get me."
+
+
+def test_the_real_failure_is_caught():
+    r = rules.check_no_invented_context(
+        "Hi Arun, I understand you're curious about the KYC steps for Pay-in-3.",
+        _GARBLED,
+    )
+    assert not r.passed
+    assert "KYC" in r.detail
+
+
+def test_the_agents_own_next_action_is_not_an_attribution():
+    """"I'll walk you through the documents" is the agent describing what they
+    will do. A check that fired on ordinary helpfulness would be switched off
+    within a day, so it must not match."""
+    assert rules.check_no_invented_context(
+        "Hi Arun, I'll walk you through the documents we need and how long it takes.",
+        _GARBLED,
+    ).passed
+
+
+def test_an_attribution_the_transcript_supports_passes():
+    assert rules.check_no_invented_context(
+        "You asked about the thousand dollars — let me clarify that.", _GARBLED
+    ).passed
+
+
+def test_paraphrase_is_allowed():
+    """One overlapping content word is enough. Demanding an exact quote would
+    fail every reasonable rewording and make the check useless."""
+    transcript = "is there any hidden charge on this thing"
+    assert rules.check_no_invented_context(
+        "You asked about hidden charges, and the honest answer is there are none.",
+        transcript,
+    ).passed
+
+
+def test_a_bare_attribution_with_no_subject_is_not_flagged():
+    """"As you mentioned," carries no claim to verify."""
+    assert rules.check_no_invented_context(
+        "As you mentioned, let me go through it again.", _GARBLED
+    ).passed
+
+
+def test_it_catches_the_topic_being_invented_from_the_crm_record():
+    """The specific mechanism: the record says KYC is not started, so the model
+    decides that is what the customer wants to discuss."""
+    r = rules.check_no_invented_context(
+        "You wanted to know about Aadhaar verification.", "hello can you hear me"
+    )
+    assert not r.passed

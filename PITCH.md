@@ -40,7 +40,7 @@ SahAI listens alongside the agent and, on every customer turn:
 - **classifies intent** and scores drop-off risk
 - **retrieves the current terms** from the knowledge base, with citations
 - **suggests what to say next**, in the agent's voice, ready to speak
-- **checks its own output** against eight guardrails before the agent sees it
+- **checks its own output** against nine guardrails before the agent sees it
 
 After the call it writes the summary, proposes a CRM update, and drafts a
 targeted follow-up — all of which sit at `pending_agent_approval` until a named
@@ -53,7 +53,7 @@ touching credit terms is flagged for the human to confirm and say themselves —
 enforced in code, and the flag can be raised by the system but never lowered by
 the model.
 
-**Six of the eight guardrails are deterministic Python, not prompt
+**Seven of the nine guardrails are deterministic Python, not prompt
 instructions.** The dashboard labels each `code` or `llm` so a compliance
 reviewer can see exactly which survive an adversarial customer:
 
@@ -109,7 +109,7 @@ Three levers, not one:
    for credit terms and objections. Escalation is a code rule with a named
    trigger logged against every decision.
 2. **RAG instead of inference.** Retrieval is the highest-frequency step in the
-   pipeline and costs **$0.00** — local embeddings plus BM25. Six of eight
+   pipeline and costs **$0.00** — local embeddings plus BM25. Seven of nine
    guardrails likewise. Across the measured calls, **185 of 652 pipeline stages
    (28%) ran at zero marginal cost.**
 3. **Reasoning-effort control.** The reasoning models bill chain-of-thought as

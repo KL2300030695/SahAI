@@ -116,6 +116,14 @@ class SelfCheckAgent(Agent[CheckIn, CheckOut]):
             grounded_spans, _ = rules.ground_figures(
                 redaction.text, inp.cited_chunk_ids, inp.citations
             )
+        # Claims about the conversation must trace to the conversation, exactly
+        # as figures must trace to the handbook. Only meaningful on a live turn:
+        # a post-call summary describes the call rather than addressing anyone.
+        if inp.stage == "live_turn":
+            checks.append(
+                rules.check_no_invented_context(redaction.text, inp.source_text)
+            )
+
         checks.append(
             rules.check_stale_terms(
                 inp.citations, inp.cited_chunk_ids, dropped_stale=dropped_stale
