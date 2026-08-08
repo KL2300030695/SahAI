@@ -171,8 +171,11 @@ def send_email(
             ),
         )
 
+    was_redirected = bool(
+        redirect and intended and redirect.lower() != intended.lower()
+    )
     subject = subject.strip() or "About your Pay-in-3 application"
-    if redirect and intended and redirect.lower() != intended.lower():
+    if was_redirected:
         # The real recipient must survive into the inbox, or a redirected demo
         # shows five identical emails with no way to tell them apart.
         subject = f"[to: {intended}] {subject}"
@@ -205,7 +208,16 @@ def send_email(
     except Exception as e:  # noqa: BLE001
         _stats["failures"] += 1
         _stats["last_error"] = _explain(e)
-        return SendResult(False, detail=_stats["last_error"], recipient=recipient)
+        # `redirected` is reported on the failure path too. Leaving it False
+        # while `recipient` holds the redirect address reads as though the
+        # attempt went to the real customer -- a small lie in exactly the field
+        # someone checks after a failed send.
+        return SendResult(
+            False,
+            detail=_stats["last_error"],
+            recipient=recipient,
+            redirected=was_redirected,
+        )
 
     mid = str(data.get("messageId") or "")
     _stats["sent"] += 1
@@ -214,7 +226,7 @@ def send_email(
         True,
         message_id=mid,
         recipient=recipient,
-        redirected=bool(redirect and intended and redirect.lower() != intended.lower()),
+        redirected=was_redirected,
         detail=f"Delivered to {recipient}.",
     )
 

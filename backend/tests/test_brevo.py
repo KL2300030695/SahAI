@@ -182,3 +182,15 @@ def test_an_ip_restriction_is_not_mislabelled_a_sender_problem(stub, monkeypatch
     assert "45.249.79.46" in res.detail
     assert "authorised_ips" in res.detail
     assert "Senders & IP" not in res.detail
+
+
+def test_a_failed_send_still_reports_that_it_was_redirected(stub, monkeypatch):
+    """Otherwise `recipient: me@team.test, redirected: false` reads as though
+    the attempt went to the real customer — misleading in exactly the field
+    someone checks after a failure."""
+    _configure(monkeypatch, brevo_redirect_to="me@team.test")
+    BEHAVIOUR.update({"status": 500, "body": {"message": "boom"}})
+    res = _send(to_email="arun@example.com")
+    assert res.ok is False
+    assert res.recipient == "me@team.test"
+    assert res.redirected is True
