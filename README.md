@@ -16,7 +16,9 @@ own. Both of those are enforced in code, not asked for in a prompt.
 > **[`docs/SahAI-Project-Brief.pdf`](docs/SahAI-Project-Brief.pdf)** — a 12-page
 > brief covering how the whole system works, every measured number, the known
 > limits, the bugs we found, and an 8-minute demo script. It is written to be
-> read cold by someone who has never seen the code.
+> read cold by someone who has never seen the code. Recording the demo? Use
+> **[`docs/SahAI-Demo-Script.pdf`](docs/SahAI-Demo-Script.pdf)** — pre-flight
+> checklist, beat-by-beat timings and the voiceover.
 
 ## Table of contents
 
