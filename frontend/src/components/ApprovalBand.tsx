@@ -276,6 +276,14 @@ export default function ApprovalBand({
             <span className="t-label">How it went</span>
             <div className="flex gap-1.5">
               <span className="tag">{crm.disposition.replace(/_/g, " ")}</span>
+              {crm.followup_timing !== "none" && (
+                <span
+                  className="tag"
+                  title="When a human should chase this lead next. Advisory — it does not delay the email."
+                >
+                  chase {crm.followup_timing.replace(/_/g, " ")}
+                </span>
+              )}
               <span
                 className={`tag ${
                   crm.conversion_probability === "high" ? "tag-verified" : ""
@@ -413,14 +421,18 @@ export default function ApprovalBand({
               style={{ borderColor: "var(--hairline)" }}
             >
               <span className="t-label">Message to send</span>
+              {/* The follow-up *timing* used to sit here, which read as a
+                  delay on this email — "within 2 hours" next to a Send button
+                  means one thing to anyone looking at it. It is advice about
+                  when a human should chase the lead next, and nothing in the
+                  system schedules on it, so it now lives with the other
+                  call-outcome metadata instead. */}
               {blocked ? (
                 <span className="tag tag-halt">needs a rewrite</span>
               ) : rewritten && failed.length > 0 ? (
                 <span className="tag tag-verified">your wording</span>
               ) : (
-                crm.followup_timing !== "none" && (
-                  <span className="tag">{crm.followup_timing.replace(/_/g, " ")}</span>
-                )
+                <span className="tag tag-verified">sends on approval</span>
               )}
             </header>
             <div className="p-4">
@@ -546,6 +558,14 @@ export default function ApprovalBand({
                               </span>
                             </label>
                           )}
+
+                          <p
+                            className="mt-1 text-[11.5px]"
+                            style={{ color: "var(--graphite)" }}
+                          >
+                            Sent the moment you approve — nothing is queued or
+                            scheduled.
+                          </p>
 
                           {sendDirect && (
                             <p

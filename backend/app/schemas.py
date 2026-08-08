@@ -129,6 +129,20 @@ class InterestLevel(str, Enum):
 
 
 class FollowUpTiming(str, Enum):
+    """When a human should chase this lead next.
+
+    Advisory only. Nothing in the pipeline schedules on it, and it does not
+    delay the follow-up email -- that is sent the moment an approver clicks.
+    It was briefly rendered beside the Send button, where "within 2 hours"
+    naturally read as a two-hour delay on the message itself.
+
+    Note the mismatch between the member name and its value: IMMEDIATE is the
+    most urgent option available and its value is `within_2_hours`, so the
+    co-pilot choosing the most urgent action produces the string that looks
+    least urgent. Kept because the values are persisted and exported, but worth
+    knowing before reading a CSV.
+    """
+
     NONE = "none"
     IMMEDIATE = "within_2_hours"
     SAME_DAY = "within_24_hours"
