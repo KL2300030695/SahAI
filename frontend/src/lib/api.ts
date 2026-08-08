@@ -172,6 +172,14 @@ export const api = {
       }>,
     ),
 
+  /** Set where a follow-up is delivered. Blank clears it. */
+  setCustomerEmail: (customerId: string, email: string) =>
+    fetch(`/api/customers/${customerId}/email`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ email }),
+    }).then(json<{ customer_id: string; email: string; changed_by: string }>),
+
   /** Who the credential says we are, and what it may do. */
   me: () =>
     fetch("/api/me", { headers: authHeaders() }).then(

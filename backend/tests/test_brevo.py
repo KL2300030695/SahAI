@@ -235,3 +235,33 @@ def test_resolve_recipient_matches_what_send_would_do(stub, monkeypatch):
     _configure(monkeypatch, brevo_redirect_to="me@team.test")
     assert resolve_recipient("arun@example.com", direct=False) == ("me@team.test", True)
     assert resolve_recipient("arun@example.com", direct=True) == ("arun@example.com", False)
+
+
+def test_an_address_change_is_written_to_the_interaction_history():
+    """A silent address change would be the one CRM edit with no trail — and
+    it is the edit that decides who receives a message a human signed."""
+    from fastapi.testclient import TestClient
+    from app.crm.db import session_scope
+    from app.crm.models import Customer, Interaction
+    from app.main import app
+
+    c = TestClient(app)
+    with session_scope() as s:
+        cust = s.get(Customer, "CUST-1042")
+        original = cust.email if cust else None
+    if original is None:
+        pytest.skip("seeded customer absent")
+
+    try:
+        r = c.patch("/api/customers/CUST-1042/email", json={"email": "new@example.com"})
+        assert r.status_code == 200
+        with session_scope() as s:
+            assert s.get(Customer, "CUST-1042").email == "new@example.com"
+            notes = [
+                i.note
+                for i in s.query(Interaction).filter_by(customer_id="CUST-1042").all()
+            ]
+        assert any("Email changed from" in n and "new@example.com" in n for n in notes)
+    finally:
+        with session_scope() as s:
+            s.get(Customer, "CUST-1042").email = original

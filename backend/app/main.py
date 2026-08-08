@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import shutil
 import uuid
@@ -60,7 +61,7 @@ from app.crm.db import (
     session_scope,
 )
 from app.crm.backends import get_crm_backend
-from app.crm.models import Call, CostRow, Customer
+from app.crm.models import Call, CostRow, Customer, Interaction
 from app.llm.client import LLMUnavailable, get_llm, is_probably_hallucination
 from app.llm.router import describe_routing
 from app.orchestrator import ConsentNotGiven, get_orchestrator
@@ -1295,6 +1296,50 @@ def integrations_sync(call_id: Optional[str] = None,
         "firestore_ok": sum(1 for v in fs.values() if v),
         "sheets": url,
     }
+
+
+class EmailBody(BaseModel):
+    email: str
+
+
+@app.patch("/api/customers/{customer_id}/email")
+def set_customer_email(
+    customer_id: str,
+    body: EmailBody,
+    principal: Principal = Depends(requires("approve")),
+) -> dict:
+    """Set the address a follow-up will be delivered to.
+
+    This writes to a customer record, which everywhere else in this system is
+    reserved for the approval gate. The distinction is deliberate rather than an
+    exception: that gate exists to stop an *AI-proposed* patch reaching a record
+    without a human. This is a human typing a contact detail — ordinary data
+    entry, which every CRM allows — so it carries the same capability as an
+    approval and is written to the interaction history under the editor's name.
+    A silent address change would otherwise be the one CRM edit with no trail.
+
+    Blank clears it, which is the only way to stop a record being emailable.
+    """
+    address = (body.email or "").strip()
+    if address and not re.match(r"^[^@\s]+@[^@\s.]+\.[^@\s]+$", address):
+        raise HTTPException(400, f"{address!r} is not a valid email address.")
+
+    with session_scope() as s:
+        customer = s.get(Customer, customer_id)
+        if not customer:
+            raise HTTPException(404, "customer not found")
+        previous = customer.email or "(none)"
+        customer.email = address
+        s.add(
+            Interaction(
+                customer_id=customer_id,
+                note=(
+                    f"Email changed from {previous} to {address or '(none)'} "
+                    f"by {principal.audit_name}."
+                ),
+            )
+        )
+    return {"customer_id": customer_id, "email": address, "changed_by": principal.audit_name}
 
 
 @app.get("/api/calls/{call_id}/delivery-preview")

@@ -60,9 +60,33 @@ export default function ApprovalBand({
     direct_blocked_reason: string;
   } | null>(null);
   const [sendDirect, setSendDirect] = useState(false);
-  useEffect(() => {
+  const refreshDest = () =>
     api.deliveryPreview(result.call_id).then(setDest).catch(() => setDest(null));
+  useEffect(() => {
+    refreshDest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result.call_id]);
+
+  /** Editing the address the follow-up goes to, without leaving the decision. */
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const customerId = String(customerBefore?.customer_id ?? "");
+
+  async function saveEmail() {
+    if (!customerId) return;
+    setEmailBusy(true);
+    setError(null);
+    try {
+      await api.setCustomerEmail(customerId, emailDraft.trim());
+      await refreshDest();
+      setEditingEmail(false);
+    } catch (e: any) {
+      setError(String(e.message ?? e));
+    } finally {
+      setEmailBusy(false);
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -444,6 +468,54 @@ export default function ApprovalBand({
                                 : dest.goes_to_by_default || "—"}
                             </span>
                           </div>
+
+                          {/* The address itself is editable here, because
+                              needing a shell command to make a customer
+                              reachable is not a workflow. */}
+                          {editingEmail ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <input
+                                autoFocus
+                                type="email"
+                                value={emailDraft}
+                                placeholder="name@example.com"
+                                onChange={(e) => setEmailDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveEmail();
+                                  if (e.key === "Escape") setEditingEmail(false);
+                                }}
+                                className="card t-data flex-1 px-2.5 py-1.5"
+                                style={{ minWidth: 220 }}
+                              />
+                              <button
+                                onClick={saveEmail}
+                                disabled={emailBusy}
+                                className="btn btn-primary px-3 py-1.5 text-[12px]"
+                              >
+                                {emailBusy ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                onClick={() => setEditingEmail(false)}
+                                className="text-[12px] underline"
+                                style={{ color: "var(--graphite)" }}
+                              >
+                                cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEmailDraft(dest.customer_email);
+                                setEditingEmail(true);
+                              }}
+                              className="mt-1 text-[11.5px] underline"
+                              style={{ color: "var(--graphite)" }}
+                            >
+                              {dest.customer_email
+                                ? `change their address (${dest.customer_email})`
+                                : "add an address for this customer"}
+                            </button>
+                          )}
 
                           {dest.redirect_active && (
                             <label

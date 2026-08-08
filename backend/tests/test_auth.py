@@ -111,3 +111,31 @@ def test_identity_answers_anonymous_callers_instead_of_rejecting_them(guarded):
     assert body["authenticated"] is False
     assert body["auth_enabled"] is True     # so the client knows to gate
     assert body["can"]["approve"] is False
+
+
+# --- editing where a follow-up is delivered ---------------------------------
+
+
+def test_changing_a_customer_address_needs_the_approve_capability(guarded):
+    """It writes to a customer record, so it carries the same bar as approving.
+
+    A viewer who could silently repoint a follow-up at their own inbox would
+    make the approval gate irrelevant — the approver would sign a message and
+    someone else would receive it.
+    """
+    r = guarded.patch(
+        "/api/customers/CUST-1042/email",
+        headers={"X-API-Key": "k_view"},
+        json={"email": "attacker@example.com"},
+    )
+    assert r.status_code == 403
+
+
+def test_an_invalid_address_is_refused(guarded):
+    r = guarded.patch(
+        "/api/customers/CUST-1042/email",
+        headers={"X-API-Key": "k_agent"},
+        json={"email": "not-an-address"},
+    )
+    assert r.status_code == 400
+    assert "not a valid email" in r.json()["detail"]
